@@ -150,6 +150,23 @@ function toIsoDate(value) {
 }
 
 function mapImportRow(row) {
+  const joinedAt = toIsoDate(csvField(row, ['joined_at', 'joined at']));
+  const createdAt = toIsoDate(csvField(row, ['created_at', 'created at']));
+  const baptismDate = toIsoDate(csvField(row, ['baptism_date', 'baptism date']));
+  const membershipType = csvField(row, ['membership_type', 'membership type']);
+  const status = csvField(row, ['status']);
+  const totalContribution = csvField(row, ['total_contribution', 'total contribution']);
+  const baseNotes = csvField(row, ['notes', 'note', 'comments', 'comment']);
+
+  const metaNotes = [
+    membershipType ? `Membership Type: ${membershipType}` : '',
+    status ? `Status: ${status}` : '',
+    baptismDate ? `Baptism Date: ${baptismDate}` : '',
+    joinedAt ? `Joined At: ${joinedAt}` : '',
+    createdAt ? `Created At: ${createdAt}` : '',
+    totalContribution ? `Total Contribution: ${totalContribution}` : ''
+  ].filter(Boolean);
+
   return {
     name:
       csvField(row, ['name', 'full_name', 'full name', 'person', 'display_name']) ||
@@ -157,11 +174,22 @@ function mapImportRow(row) {
         .filter(Boolean)
         .join(' ')
         .trim(),
-    phone: csvField(row, ['phone', 'mobile', 'phone_number', 'phone number']),
+    phone: csvField(row, ['phone', 'mobile', 'phone_number', 'phone number', 'primary_telephone', 'primary telephone']),
     email: csvField(row, ['email', 'e_mail', 'email_address', 'email address']),
     birthday: toIsoDate(csvField(row, ['birthday', 'birthdate', 'dob', 'date_of_birth'])),
     sectionId: csvField(row, ['section', 'section_id', 'zone', 'area']),
-    notes: csvField(row, ['notes', 'note', 'comments', 'comment'])
+    notes: [baseNotes, metaNotes.join(' | ')].filter(Boolean).join(' | '),
+    gender: csvField(row, ['gender']),
+    maritalStatus: csvField(row, ['marital_status', 'marital status']),
+    address: csvField(row, ['address', 'primary_address', 'primary address']),
+    city: csvField(row, ['city']),
+    state: csvField(row, ['state']),
+    zipCode: csvField(row, ['zip', 'zip_code', 'zip code']),
+    membershipType,
+    joinedAt,
+    createdAt,
+    baptismDate,
+    totalContribution
   };
 }
 
@@ -202,18 +230,23 @@ async function importPeopleRows(rows) {
         birthday: row.birthday,
         sectionId: row.sectionId,
         notes: row.notes,
-        gender: '',
+        gender: row.gender || '',
         ageGroup: '',
         occupation: '',
         language: '',
-        maritalStatus: '',
+        maritalStatus: row.maritalStatus || '',
         allergies: '',
         emergencyContact: '',
         medicalNotes: '',
-        address: '',
-        city: '',
-        state: '',
-        zipCode: '',
+        address: row.address || '',
+        city: row.city || '',
+        state: row.state || '',
+        zipCode: row.zipCode || '',
+        membershipType: row.membershipType || '',
+        joinedAt: row.joinedAt || '',
+        createdAt: row.createdAt || '',
+        baptismDate: row.baptismDate || '',
+        totalContribution: row.totalContribution || '',
         updatedAt: new Date().toISOString()
       });
     });
