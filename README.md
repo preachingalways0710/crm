@@ -6,7 +6,7 @@ A focused, self-hosted church operations interface for:
 - Gracely-style person profile layout (tabs + cards + quick actions)
 - Follow-ups and visit logging per person
 - Global follow-up queue
-- CSV people import (for exported data migration)
+- CSV and Excel people import (XLS/XLSX export migration)
 - Metrics and attendance integration
 - Yearly calendar planning
 - Registration forms (starter level)
@@ -18,7 +18,7 @@ A focused, self-hosted church operations interface for:
 - EJS server-rendered UI
 - Tabler UI kit (open source admin framework via CDN)
 - File-based JSON persistence (`data/data.json`)
-- csv-parse (CSV import parser)
+- csv-parse + xlsx + multer (CSV/Excel import parser and upload)
 - FullCalendar (calendar UI)
 - Leaflet + Leaflet.draw (visitation map sections)
 

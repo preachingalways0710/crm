@@ -1,6 +1,8 @@
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const multer = require('multer');
+const XLSX = require('xlsx');
 const { parse } = require('csv-parse/sync');
 const { readData, updateData } = require('./lib/dataStore');
 
@@ -13,6 +15,10 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use('/static', express.static(path.join(__dirname, 'public')));
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 }
+});
 
 function id() {
   return crypto.randomUUID();
@@ -106,6 +112,81 @@ function toIsoDate(value) {
   }
 
   return parsed.toISOString().slice(0, 10);
+}
+
+function mapImportRow(row) {
+  return {
+    name:
+      csvField(row, ['name', 'full_name', 'full name', 'person', 'display_name']) ||
+      [csvField(row, ['first_name', 'first name']), csvField(row, ['last_name', 'last name'])]
+        .filter(Boolean)
+        .join(' ')
+        .trim(),
+    phone: csvField(row, ['phone', 'mobile', 'phone_number', 'phone number']),
+    email: csvField(row, ['email', 'email_address', 'email address']),
+    birthday: toIsoDate(csvField(row, ['birthday', 'birthdate', 'dob', 'date_of_birth'])),
+    sectionId: csvField(row, ['section', 'section_id', 'zone', 'area']),
+    notes: csvField(row, ['notes', 'note', 'comments', 'comment'])
+  };
+}
+
+async function importPeopleRows(rows) {
+  const candidates = rows.map(mapImportRow);
+  let imported = 0;
+  let skipped = 0;
+
+  await updateData((data) => {
+    const existingKeys = new Set(
+      data.people.map((person) => {
+        const keyName = normalize(person.name).toLowerCase();
+        const keyPhone = normalizePhone(person.phone);
+        const keyEmail = normalize(person.email).toLowerCase();
+        return `${keyName}|${keyPhone}|${keyEmail}`;
+      })
+    );
+
+    candidates.forEach((row) => {
+      if (!row.name) {
+        skipped += 1;
+        return;
+      }
+
+      const key = `${row.name.toLowerCase()}|${normalizePhone(row.phone)}|${row.email.toLowerCase()}`;
+      if (existingKeys.has(key)) {
+        skipped += 1;
+        return;
+      }
+
+      existingKeys.add(key);
+      imported += 1;
+      data.people.push({
+        id: id(),
+        name: row.name,
+        phone: row.phone,
+        email: row.email,
+        birthday: row.birthday,
+        sectionId: row.sectionId,
+        notes: row.notes,
+        gender: '',
+        ageGroup: '',
+        occupation: '',
+        language: '',
+        maritalStatus: '',
+        allergies: '',
+        emergencyContact: '',
+        medicalNotes: '',
+        address: '',
+        city: '',
+        state: '',
+        zipCode: '',
+        updatedAt: new Date().toISOString()
+      });
+    });
+
+    return data;
+  });
+
+  return { imported, skipped };
 }
 
 app.get('/', (req, res) => {
@@ -733,79 +814,60 @@ app.post('/import/people', async (req, res, next) => {
       return res.redirect('/import?message=No+CSV+rows+found');
     }
 
-    const candidates = rows.map((row) => ({
-      name:
-        csvField(row, ['name', 'full_name', 'full name', 'person', 'display_name']) ||
-        [csvField(row, ['first_name', 'first name']), csvField(row, ['last_name', 'last name'])]
-          .filter(Boolean)
-          .join(' ')
-          .trim(),
-      phone: csvField(row, ['phone', 'mobile', 'phone_number', 'phone number']),
-      email: csvField(row, ['email', 'email_address', 'email address']),
-      birthday: toIsoDate(csvField(row, ['birthday', 'birthdate', 'dob', 'date_of_birth'])),
-      sectionId: csvField(row, ['section', 'section_id', 'zone', 'area']),
-      notes: csvField(row, ['notes', 'note', 'comments', 'comment'])
-    }));
-
-    let imported = 0;
-    let skipped = 0;
-
-    await updateData((data) => {
-      const existingKeys = new Set(
-        data.people.map((person) => {
-          const keyName = normalize(person.name).toLowerCase();
-          const keyPhone = normalizePhone(person.phone);
-          const keyEmail = normalize(person.email).toLowerCase();
-          return `${keyName}|${keyPhone}|${keyEmail}`;
-        })
-      );
-
-      candidates.forEach((row) => {
-        if (!row.name) {
-          skipped += 1;
-          return;
-        }
-
-        const key = `${row.name.toLowerCase()}|${normalizePhone(row.phone)}|${row.email.toLowerCase()}`;
-
-        if (existingKeys.has(key)) {
-          skipped += 1;
-          return;
-        }
-
-        existingKeys.add(key);
-        imported += 1;
-        data.people.push({
-          id: id(),
-          name: row.name,
-          phone: row.phone,
-          email: row.email,
-          birthday: row.birthday,
-          sectionId: row.sectionId,
-          notes: row.notes,
-          gender: '',
-          ageGroup: '',
-          occupation: '',
-          language: '',
-          maritalStatus: '',
-          allergies: '',
-          emergencyContact: '',
-          medicalNotes: '',
-          address: '',
-          city: '',
-          state: '',
-          zipCode: '',
-          updatedAt: new Date().toISOString()
-        });
-      });
-
-      return data;
-    });
+    const { imported, skipped } = await importPeopleRows(rows);
 
     const params = new URLSearchParams({
       imported: String(imported),
       skipped: String(skipped),
       message: 'Import complete'
+    });
+
+    res.redirect(`/import?${params.toString()}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/import/people/file', upload.single('peopleFile'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.redirect('/import?message=Choose+a+file+first');
+    }
+
+    const ext = path.extname(req.file.originalname || '').toLowerCase();
+    let rows = [];
+
+    if (ext === '.csv') {
+      rows = parse(req.file.buffer.toString('utf8'), {
+        columns: true,
+        trim: true,
+        skip_empty_lines: true,
+        bom: true,
+        relax_column_count: true
+      });
+    } else if (ext === '.xls' || ext === '.xlsx') {
+      const workbook = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
+      const [firstSheetName] = workbook.SheetNames;
+
+      if (!firstSheetName) {
+        return res.redirect('/import?message=No+sheets+found+in+Excel+file');
+      }
+
+      const sheet = workbook.Sheets[firstSheetName];
+      rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    } else {
+      return res.redirect('/import?message=Unsupported+file+type.+Use+CSV,+XLS,+or+XLSX');
+    }
+
+    if (!rows.length) {
+      return res.redirect('/import?message=No+rows+found+in+uploaded+file');
+    }
+
+    const { imported, skipped } = await importPeopleRows(rows);
+    const params = new URLSearchParams({
+      imported: String(imported),
+      skipped: String(skipped),
+      message: `Import complete from ${ext.replace('.', '').toUpperCase() || 'file'}`
     });
 
     res.redirect(`/import?${params.toString()}`);
@@ -881,6 +943,10 @@ app.delete('/api/sections/:id', async (req, res, next) => {
 });
 
 app.use((err, req, res, next) => {
+  if (req.path === '/import/people/file' && err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.redirect('/import?message=File+is+too+large.+Max+size+is+8MB');
+  }
+
   console.error(err);
   res.status(500).send('Something went wrong. Check server logs.');
 });

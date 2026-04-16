@@ -2,11 +2,31 @@
 
 <div class="row g-3">
   <div class="col-12 col-lg-8">
+    <div class="card mb-3">
+      <div class="card-header"><h3 class="card-title">Upload Excel or CSV</h3></div>
+      <div class="card-body">
+        <p class="text-secondary">
+          Best option for Gracely exports: upload `.xls` or `.xlsx` directly. CSV also supported.
+          PDF exports are not import-friendly, so use Excel export for data migration.
+        </p>
+
+        <form method="post" action="/import/people/file" enctype="multipart/form-data" class="row g-2">
+          <div class="col-12">
+            <label class="form-label">File</label>
+            <input class="form-control" type="file" name="peopleFile" accept=".xls,.xlsx,.csv" required />
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-primary">Upload and Import</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header"><h3 class="card-title">Import People from CSV</h3></div>
       <div class="card-body">
         <p class="text-secondary">
-          Paste exported CSV content from Gracely/Breeze/etc. Header names are auto-detected for common fields
+          Or paste CSV content manually. Header names are auto-detected for common fields
           (`name`, `first_name`, `last_name`, `phone`, `email`, `birthday`, `notes`, `section`).
         </p>
 
