@@ -89,13 +89,48 @@ function normalizePhone(value) {
   return normalize(value).replace(/[^\d]/g, '');
 }
 
+function normalizeHeaderKey(value) {
+  return normalize(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function normalizeImportRow(row) {
+  return Object.entries(row || {}).reduce((acc, [key, value]) => {
+    const normalizedKey = normalizeHeaderKey(key);
+    if (normalizedKey) {
+      acc[normalizedKey] = value;
+    }
+    return acc;
+  }, {});
+}
+
 function csvField(row, candidates) {
+  const normalizedRow = normalizeImportRow(row);
+
   for (const key of candidates) {
-    if (Object.prototype.hasOwnProperty.call(row, key) && normalize(row[key])) {
-      return normalize(row[key]);
+    const normalizedKey = normalizeHeaderKey(key);
+    if (Object.prototype.hasOwnProperty.call(normalizedRow, normalizedKey) && normalize(normalizedRow[normalizedKey])) {
+      return normalize(normalizedRow[normalizedKey]);
     }
   }
   return '';
+}
+
+function detectDelimiter(csvText) {
+  const firstDataLine = csvText
+    .split(/\r?\n/)
+    .find((line) => normalize(line).length > 0) || '';
+
+  const delimiters = [',', ';', '\t', '|'];
+  const counts = delimiters.map((delimiter) => ({
+    delimiter,
+    count: firstDataLine.split(delimiter).length - 1
+  }));
+
+  counts.sort((a, b) => b.count - a.count);
+  return counts[0].count > 0 ? counts[0].delimiter : ',';
 }
 
 function toIsoDate(value) {
@@ -123,7 +158,7 @@ function mapImportRow(row) {
         .join(' ')
         .trim(),
     phone: csvField(row, ['phone', 'mobile', 'phone_number', 'phone number']),
-    email: csvField(row, ['email', 'email_address', 'email address']),
+    email: csvField(row, ['email', 'e_mail', 'email_address', 'email address']),
     birthday: toIsoDate(csvField(row, ['birthday', 'birthdate', 'dob', 'date_of_birth'])),
     sectionId: csvField(row, ['section', 'section_id', 'zone', 'area']),
     notes: csvField(row, ['notes', 'note', 'comments', 'comment'])
@@ -799,8 +834,10 @@ app.post('/import/people', async (req, res, next) => {
 
     let rows;
     try {
+      const delimiter = detectDelimiter(csvText);
       rows = parse(csvText, {
         columns: true,
+        delimiter,
         trim: true,
         skip_empty_lines: true,
         bom: true,
@@ -816,10 +853,14 @@ app.post('/import/people', async (req, res, next) => {
 
     const { imported, skipped } = await importPeopleRows(rows);
 
+    const message =
+      imported === 0 && skipped > 0
+        ? 'No rows imported. Check column headers and delimiter'
+        : 'Import complete';
     const params = new URLSearchParams({
       imported: String(imported),
       skipped: String(skipped),
-      message: 'Import complete'
+      message
     });
 
     res.redirect(`/import?${params.toString()}`);
@@ -838,8 +879,12 @@ app.post('/import/people/file', upload.single('peopleFile'), async (req, res, ne
     let rows = [];
 
     if (ext === '.csv') {
-      rows = parse(req.file.buffer.toString('utf8'), {
+      const csvText = req.file.buffer.toString('utf8');
+      const delimiter = detectDelimiter(csvText);
+
+      rows = parse(csvText, {
         columns: true,
+        delimiter,
         trim: true,
         skip_empty_lines: true,
         bom: true,
@@ -864,10 +909,15 @@ app.post('/import/people/file', upload.single('peopleFile'), async (req, res, ne
     }
 
     const { imported, skipped } = await importPeopleRows(rows);
+    const source = ext.replace('.', '').toUpperCase() || 'file';
+    const message =
+      imported === 0 && skipped > 0
+        ? `No rows imported from ${source}. Check column headers`
+        : `Import complete from ${source}`;
     const params = new URLSearchParams({
       imported: String(imported),
       skipped: String(skipped),
-      message: `Import complete from ${ext.replace('.', '').toUpperCase() || 'file'}`
+      message
     });
 
     res.redirect(`/import?${params.toString()}`);
