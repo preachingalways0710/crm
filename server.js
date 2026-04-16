@@ -1,6 +1,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const { parse } = require('csv-parse/sync');
 const { readData, updateData } = require('./lib/dataStore');
 
 const app = express();
@@ -74,6 +75,39 @@ function enrichPerson(person) {
   };
 }
 
+function normalize(value) {
+  return (value || '').toString().trim();
+}
+
+function normalizePhone(value) {
+  return normalize(value).replace(/[^\d]/g, '');
+}
+
+function csvField(row, candidates) {
+  for (const key of candidates) {
+    if (Object.prototype.hasOwnProperty.call(row, key) && normalize(row[key])) {
+      return normalize(row[key]);
+    }
+  }
+  return '';
+}
+
+function toIsoDate(value) {
+  const raw = normalize(value);
+  if (!raw) return '';
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
 app.get('/', (req, res) => {
   res.redirect('/people');
 });
@@ -81,6 +115,8 @@ app.get('/', (req, res) => {
 app.get('/people', async (req, res, next) => {
   try {
     const data = await readData();
+    const q = normalize(req.query.q).toLowerCase();
+    const followups = normalize(req.query.followups) || 'all';
 
     const openFollowUpsByPerson = data.followUps
       .filter((item) => item.status !== 'completed')
@@ -89,14 +125,35 @@ app.get('/people', async (req, res, next) => {
         return acc;
       }, {});
 
-    const people = sortByName(data.people).map((person) => ({
+    let people = sortByName(data.people).map((person) => ({
       ...enrichPerson(person),
       openFollowUps: openFollowUpsByPerson[person.id] || 0
     }));
 
+    if (q) {
+      people = people.filter((person) =>
+        [
+          person.name,
+          person.email,
+          person.phone,
+          person.sectionId,
+          person.notes
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+
+    if (followups === 'open') {
+      people = people.filter((person) => person.openFollowUps > 0);
+    }
+
     res.render('people', {
       activeTab: 'people',
-      people
+      people,
+      q,
+      followups
     });
   } catch (err) {
     next(err);
@@ -329,6 +386,81 @@ app.post('/people/:id/visits', async (req, res, next) => {
   }
 });
 
+app.get('/followups', async (req, res, next) => {
+  try {
+    const data = await readData();
+    const status = normalize(req.query.status) || 'open';
+
+    const peopleById = data.people.reduce((acc, person) => {
+      acc[person.id] = person;
+      return acc;
+    }, {});
+
+    let queue = data.followUps
+      .map((item) => {
+        const person = peopleById[item.personId];
+        return {
+          ...item,
+          personName: person?.name || 'Unknown person',
+          personLink: person ? `/people/${person.id}?tab=followups` : '/people'
+        };
+      })
+      .sort((a, b) => {
+        const aDate = a.dueDate || a.createdAt;
+        const bDate = b.dueDate || b.createdAt;
+        return new Date(aDate) - new Date(bDate);
+      });
+
+    if (status === 'open') {
+      queue = queue.filter((item) => item.status !== 'completed');
+    } else if (status === 'completed') {
+      queue = queue.filter((item) => item.status === 'completed');
+    }
+
+    res.render('followups', {
+      activeTab: 'followups',
+      queue,
+      status
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/followups/:followUpId/complete', async (req, res, next) => {
+  try {
+    await updateData((data) => {
+      const row = data.followUps.find((entry) => entry.id === req.params.followUpId);
+      if (row) {
+        row.status = 'completed';
+        row.completedAt = new Date().toISOString();
+      }
+      return data;
+    });
+
+    res.redirect('/followups?status=open');
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/followups/:followUpId/reopen', async (req, res, next) => {
+  try {
+    await updateData((data) => {
+      const row = data.followUps.find((entry) => entry.id === req.params.followUpId);
+      if (row) {
+        row.status = 'open';
+        row.completedAt = '';
+      }
+      return data;
+    });
+
+    res.redirect('/followups?status=completed');
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get('/metrics', async (req, res, next) => {
   try {
     const data = await readData();
@@ -555,6 +687,128 @@ app.post('/register/:id', async (req, res, next) => {
     });
 
     res.render('form-submitted', { formName: form.name });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/import', async (req, res, next) => {
+  try {
+    const data = await readData();
+
+    res.render('import', {
+      activeTab: 'import',
+      totalPeople: data.people.length,
+      imported: normalize(req.query.imported),
+      skipped: normalize(req.query.skipped),
+      message: normalize(req.query.message)
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/import/people', async (req, res, next) => {
+  try {
+    const csvText = normalize(req.body.csvText);
+
+    if (!csvText) {
+      return res.redirect('/import?message=Paste+CSV+content+first');
+    }
+
+    let rows;
+    try {
+      rows = parse(csvText, {
+        columns: true,
+        trim: true,
+        skip_empty_lines: true,
+        bom: true,
+        relax_column_count: true
+      });
+    } catch {
+      return res.redirect('/import?message=CSV+format+could+not+be+parsed');
+    }
+
+    if (!rows.length) {
+      return res.redirect('/import?message=No+CSV+rows+found');
+    }
+
+    const candidates = rows.map((row) => ({
+      name:
+        csvField(row, ['name', 'full_name', 'full name', 'person', 'display_name']) ||
+        [csvField(row, ['first_name', 'first name']), csvField(row, ['last_name', 'last name'])]
+          .filter(Boolean)
+          .join(' ')
+          .trim(),
+      phone: csvField(row, ['phone', 'mobile', 'phone_number', 'phone number']),
+      email: csvField(row, ['email', 'email_address', 'email address']),
+      birthday: toIsoDate(csvField(row, ['birthday', 'birthdate', 'dob', 'date_of_birth'])),
+      sectionId: csvField(row, ['section', 'section_id', 'zone', 'area']),
+      notes: csvField(row, ['notes', 'note', 'comments', 'comment'])
+    }));
+
+    let imported = 0;
+    let skipped = 0;
+
+    await updateData((data) => {
+      const existingKeys = new Set(
+        data.people.map((person) => {
+          const keyName = normalize(person.name).toLowerCase();
+          const keyPhone = normalizePhone(person.phone);
+          const keyEmail = normalize(person.email).toLowerCase();
+          return `${keyName}|${keyPhone}|${keyEmail}`;
+        })
+      );
+
+      candidates.forEach((row) => {
+        if (!row.name) {
+          skipped += 1;
+          return;
+        }
+
+        const key = `${row.name.toLowerCase()}|${normalizePhone(row.phone)}|${row.email.toLowerCase()}`;
+
+        if (existingKeys.has(key)) {
+          skipped += 1;
+          return;
+        }
+
+        existingKeys.add(key);
+        imported += 1;
+        data.people.push({
+          id: id(),
+          name: row.name,
+          phone: row.phone,
+          email: row.email,
+          birthday: row.birthday,
+          sectionId: row.sectionId,
+          notes: row.notes,
+          gender: '',
+          ageGroup: '',
+          occupation: '',
+          language: '',
+          maritalStatus: '',
+          allergies: '',
+          emergencyContact: '',
+          medicalNotes: '',
+          address: '',
+          city: '',
+          state: '',
+          zipCode: '',
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      return data;
+    });
+
+    const params = new URLSearchParams({
+      imported: String(imported),
+      skipped: String(skipped),
+      message: 'Import complete'
+    });
+
+    res.redirect(`/import?${params.toString()}`);
   } catch (err) {
     next(err);
   }

@@ -1,0 +1,68 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Global Follow-up Queue</h3>
+    <div class="card-actions">
+      <span class="badge bg-secondary-lt"><%= queue.length %> items</span>
+    </div>
+  </div>
+  <div class="card-body border-bottom">
+    <form method="get" action="/followups" class="row g-2">
+      <div class="col-12 col-md-4">
+        <label class="form-label">Status</label>
+        <select class="form-select" name="status">
+          <option value="open" <%= status === 'open' ? 'selected' : '' %>>Open</option>
+          <option value="completed" <%= status === 'completed' ? 'selected' : '' %>>Completed</option>
+          <option value="all" <%= status === 'all' ? 'selected' : '' %>>All</option>
+        </select>
+      </div>
+      <div class="col-12 col-md-2 d-flex align-items-end">
+        <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-vcenter">
+      <thead>
+        <tr>
+          <th>Person</th>
+          <th>Task</th>
+          <th>Due Date</th>
+          <th>Status</th>
+          <th>Notes</th>
+          <th class="w-1"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (!queue.length) { %>
+          <tr><td colspan="6" class="text-secondary">No follow-ups found for this filter.</td></tr>
+        <% } %>
+
+        <% queue.forEach((item) => { %>
+          <tr>
+            <td><a href="<%= item.personLink %>"><%= item.personName %></a></td>
+            <td><%= item.title %></td>
+            <td><%= item.dueDate || '-' %></td>
+            <td><span class="badge <%= item.status === 'completed' ? 'bg-green-lt' : 'bg-orange-lt' %>"><%= item.status %></span></td>
+            <td><%= item.notes || '-' %></td>
+            <td>
+              <% if (item.status === 'completed') { %>
+                <form method="post" action="/followups/<%= item.id %>/reopen">
+                  <button class="btn btn-outline-secondary btn-sm" type="submit">Reopen</button>
+                </form>
+              <% } else { %>
+                <form method="post" action="/followups/<%= item.id %>/complete">
+                  <button class="btn btn-primary btn-sm" type="submit">Complete</button>
+                </form>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<%- include('partials-footer') %>

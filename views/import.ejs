@@ -1,0 +1,50 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-8">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Import People from CSV</h3></div>
+      <div class="card-body">
+        <p class="text-secondary">
+          Paste exported CSV content from Gracely/Breeze/etc. Header names are auto-detected for common fields
+          (`name`, `first_name`, `last_name`, `phone`, `email`, `birthday`, `notes`, `section`).
+        </p>
+
+        <form method="post" action="/import/people" class="row g-2">
+          <div class="col-12">
+            <label class="form-label">CSV Content</label>
+            <textarea class="form-control" name="csvText" rows="14" placeholder="name,email,phone,birthday,notes&#10;Jane Doe,jane@email.com,555-1234,1988-01-12,New family"></textarea>
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-primary">Import People</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-4">
+    <div class="card mb-3">
+      <div class="card-header"><h3 class="card-title">Current Data</h3></div>
+      <div class="card-body">
+        <div class="h1 m-0"><%= totalPeople %></div>
+        <div class="text-secondary">People currently in CRM</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Last Import</h3></div>
+      <div class="card-body">
+        <% if (message) { %>
+          <p><strong><%= message %></strong></p>
+        <% } else { %>
+          <p class="text-secondary">No import run this session.</p>
+        <% } %>
+        <p class="mb-1">Imported: <strong><%= imported || '0' %></strong></p>
+        <p class="mb-0">Skipped (duplicates/invalid): <strong><%= skipped || '0' %></strong></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<%- include('partials-footer') %>

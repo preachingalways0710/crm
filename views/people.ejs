@@ -44,6 +44,24 @@
         <h3 class="card-title">People Directory</h3>
         <div class="card-actions"><span class="badge bg-secondary-lt"><%= people.length %> people</span></div>
       </div>
+      <div class="card-body border-bottom">
+        <form method="get" action="/people" class="row g-2">
+          <div class="col-12 col-md-6">
+            <label class="form-label">Search</label>
+            <input class="form-control" name="q" value="<%= q || '' %>" placeholder="Name, phone, email, section, notes" />
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">Follow-up Filter</label>
+            <select class="form-select" name="followups">
+              <option value="all" <%= followups === 'all' ? 'selected' : '' %>>All people</option>
+              <option value="open" <%= followups === 'open' ? 'selected' : '' %>>Only with open follow-ups</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
+          </div>
+        </form>
+      </div>
 
       <div class="table-responsive">
         <table class="table table-vcenter">
