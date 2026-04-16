@@ -1,0 +1,50 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="row row-deck row-cards mb-3">
+  <div class="col-sm-6 col-lg-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-secondary">Total People</div>
+        <div class="display-6"><%= totalPeople %></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-secondary">Birthdays This Month</div>
+        <div class="display-6"><%= birthdaysThisMonth %></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-secondary">Visits This Month</div>
+        <div class="display-6"><%= visitsThisMonth %></div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card">
+      <div class="card-body">
+        <div class="text-secondary">Open Follow-ups</div>
+        <div class="display-6"><%= openFollowUps %></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h3 class="card-title">Attendance Integration</h3></div>
+  <div class="card-body">
+    <% if (attendanceAppUrl) { %>
+      <p class="text-secondary">Embedded from <code>ATTENDANCE_APP_URL</code>.</p>
+      <iframe src="<%= attendanceAppUrl %>" class="embed"></iframe>
+    <% } else { %>
+      <p class="text-secondary">Set <code>ATTENDANCE_APP_URL</code> in environment variables to embed your attendance app here.</p>
+    <% } %>
+  </div>
+</div>
+
+<%- include('partials-footer') %>

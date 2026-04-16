@@ -1,0 +1,57 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-5">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Create Registration Form</h3></div>
+      <div class="card-body">
+        <form method="post" action="/forms" class="row g-2">
+          <div class="col-12">
+            <label class="form-label">Name</label>
+            <input class="form-control" name="name" required placeholder="Event Registration" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Description</label>
+            <input class="form-control" name="description" placeholder="Optional" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Fields (one per line: Label|type|yes/no)</label>
+            <textarea class="form-control" name="fields" rows="6" placeholder="Full Name|text|yes&#10;Phone|tel|yes&#10;Notes|text|no"></textarea>
+          </div>
+          <div class="col-12"><button type="submit" class="btn btn-primary">Create Form</button></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-7">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Forms</h3></div>
+      <div class="card-body">
+        <% if (!forms.length) { %>
+          <p class="text-secondary">No forms created yet.</p>
+        <% } %>
+
+        <div class="list-group list-group-flush">
+          <% forms.forEach((form) => { %>
+            <% const count = submissions.filter((entry) => entry.formId === form.id).length; %>
+            <div class="list-group-item">
+              <h4 class="m-0"><%= form.name %></h4>
+              <p class="text-secondary mb-2"><%= form.description %></p>
+              <p class="mb-1"><strong>Public URL:</strong> <a href="/register/<%= form.id %>" target="_blank">/register/<%= form.id %></a></p>
+              <p class="mb-2"><strong>Submissions:</strong> <%= count %></p>
+              <div class="d-flex gap-2">
+                <a class="btn btn-outline-primary btn-sm" href="/forms/<%= form.id %>/submissions">View Submissions</a>
+                <form method="post" action="/forms/<%= form.id %>/delete" onsubmit="return confirm('Delete this form?');">
+                  <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
+                </form>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<%- include('partials-footer') %>

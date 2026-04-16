@@ -1,0 +1,23 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="card">
+  <div class="card-header"><h3 class="card-title"><%= form.name %> Submissions</h3></div>
+  <div class="card-body">
+    <% if (!rows.length) { %>
+      <p class="text-secondary">No submissions yet.</p>
+    <% } %>
+
+    <div class="list-group list-group-flush">
+      <% rows.forEach((row) => { %>
+        <div class="list-group-item">
+          <p><strong>Submitted:</strong> <%= new Date(row.submittedAt).toLocaleString() %></p>
+          <% Object.entries(row.answers).forEach(([key, val]) => { %>
+            <p class="mb-1"><strong><%= key %>:</strong> <%= val %></p>
+          <% }) %>
+        </div>
+      <% }) %>
+    </div>
+  </div>
+</div>
+
+<%- include('partials-footer') %>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title><%= form.name %></title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.4.0/dist/css/tabler.min.css" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="page">
+    <div class="page-wrapper">
+      <div class="container container-tight py-5">
+        <div class="card">
+          <div class="card-body">
+            <h1 class="mb-2"><%= form.name %></h1>
+            <p class="text-secondary"><%= form.description %></p>
+            <form method="post" action="/register/<%= form.id %>" class="row g-2">
+              <% form.fields.forEach((field) => { %>
+                <div class="col-12">
+                  <label class="form-label"><%= field.label %></label>
+                  <input class="form-control" type="<%= field.type || 'text' %>" name="<%= field.id %>" <%= field.required ? 'required' : '' %> />
+                </div>
+              <% }) %>
+              <div class="col-12"><button type="submit" class="btn btn-primary">Submit</button></div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

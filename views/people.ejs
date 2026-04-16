@@ -1,0 +1,88 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-4">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Add Person</h3></div>
+      <div class="card-body">
+        <form method="post" action="/people" class="row g-2">
+          <div class="col-12">
+            <label class="form-label">Full Name</label>
+            <input class="form-control" name="name" required />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Phone</label>
+            <input class="form-control" name="phone" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Email</label>
+            <input class="form-control" name="email" type="email" />
+          </div>
+          <div class="col-6">
+            <label class="form-label">Birthday</label>
+            <input class="form-control" name="birthday" type="date" />
+          </div>
+          <div class="col-6">
+            <label class="form-label">Section</label>
+            <input class="form-control" name="sectionId" placeholder="North-1" />
+          </div>
+          <div class="col-12">
+            <label class="form-label">Notes</label>
+            <textarea class="form-control" name="notes" rows="3"></textarea>
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-primary w-100">Create Person</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">People Directory</h3>
+        <div class="card-actions"><span class="badge bg-secondary-lt"><%= people.length %> people</span></div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-vcenter">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Contact</th>
+              <th>Birthday</th>
+              <th>Open Follow-ups</th>
+              <th class="w-1"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (!people.length) { %>
+              <tr><td colspan="5" class="text-secondary">No people added yet.</td></tr>
+            <% } %>
+
+            <% people.forEach((person) => { %>
+              <tr>
+                <td>
+                  <div class="fw-semibold"><%= person.name %></div>
+                  <div class="text-secondary">Profile <%= person.profilePercent %>% complete</div>
+                </td>
+                <td>
+                  <div><%= person.phone || '-' %></div>
+                  <div class="text-secondary"><%= person.email || '-' %></div>
+                </td>
+                <td><%= person.birthday || '-' %></td>
+                <td><span class="badge <%= person.openFollowUps ? 'bg-red-lt' : 'bg-green-lt' %>"><%= person.openFollowUps %></span></td>
+                <td>
+                  <a class="btn btn-primary btn-sm" href="/people/<%= person.id %>">Open</a>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<%- include('partials-footer') %>

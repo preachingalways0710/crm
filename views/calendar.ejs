@@ -1,0 +1,17 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">Church Calendar</h3>
+  </div>
+  <div class="card-body">
+    <p class="text-secondary">Click a date to add an event. Click an event to edit or delete.</p>
+    <div id="calendar"></div>
+  </div>
+</div>
+
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/main.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.js"></script>
+<script src="/static/js/calendar.js"></script>
+
+<%- include('partials-footer') %>

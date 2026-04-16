@@ -1,0 +1,44 @@
+body {
+  background: #f5f7fb;
+}
+
+#calendar {
+  min-height: 700px;
+}
+
+.embed {
+  width: 100%;
+  min-height: 700px;
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+}
+
+#map {
+  min-height: 520px;
+  border: 1px solid #d8dee9;
+  border-radius: 8px;
+  margin-top: 1rem;
+}
+
+.section-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e8ecf3;
+  padding: 0.75rem 0;
+}
+
+.section-row:last-child {
+  border-bottom: 0;
+}
+
+.sticky-card {
+  position: sticky;
+  top: 1rem;
+}
+
+@media (max-width: 992px) {
+  .sticky-card {
+    position: static;
+  }
+}
