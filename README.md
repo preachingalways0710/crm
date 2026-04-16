@@ -7,8 +7,10 @@ A focused, self-hosted church operations interface for:
 - Follow-ups and visit logging per person
 - Global follow-up queue
 - CSV and Excel people import (XLS/XLSX export migration)
+- Membership type classification (Prospect, Member, Voting Member)
 - Metrics and attendance integration
 - Yearly calendar planning
+- Calendar birthday overlay toggle
 - Registration forms (starter level)
 - Visitation map sections (draw and track)
 

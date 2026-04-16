@@ -28,11 +28,16 @@ function sortByName(list) {
   return [...list].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
 function calculateAge(birthday) {
   if (!birthday) return null;
 
   const today = new Date();
-  const dob = new Date(birthday);
+  const normalizedBirthday = toIsoDate(birthday);
+  const dob = new Date(normalizedBirthday);
 
   if (Number.isNaN(dob.getTime())) return null;
 
@@ -137,6 +142,22 @@ function toIsoDate(value) {
   const raw = normalize(value);
   if (!raw) return '';
 
+  const dmyMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const month = Number(dmyMatch[2]);
+    const year = Number(dmyMatch[3]);
+
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    if (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    ) {
+      return `${year}-${pad2(month)}-${pad2(day)}`;
+    }
+  }
+
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     return raw;
   }
@@ -148,6 +169,55 @@ function toIsoDate(value) {
 
   return parsed.toISOString().slice(0, 10);
 }
+
+function formatDateDMY(value) {
+  const iso = toIsoDate(value);
+  if (!iso) return '-';
+  const [year, month, day] = iso.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function nextBirthdayDate(birthday, now = new Date()) {
+  const iso = toIsoDate(birthday);
+  if (!iso) return null;
+
+  const [, monthString, dayString] = iso.split('-');
+  const month = Number(monthString);
+  const day = Number(dayString);
+  const year = now.getFullYear();
+
+  const currentYearBirthday = new Date(year, month - 1, day);
+  if (Number.isNaN(currentYearBirthday.getTime()) || currentYearBirthday.getMonth() !== month - 1) {
+    // Feb 29 fallback for non-leap years.
+    if (month === 2 && day === 29) {
+      const fallback = new Date(year, 1, 28);
+      if (fallback >= new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+        return fallback;
+      }
+      return new Date(year + 1, 1, 28);
+    }
+    return null;
+  }
+
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (currentYearBirthday >= todayStart) {
+    return currentYearBirthday;
+  }
+  return new Date(year + 1, month - 1, day);
+}
+
+function diffDays(dateA, dateB) {
+  const startA = new Date(dateA.getFullYear(), dateA.getMonth(), dateA.getDate());
+  const startB = new Date(dateB.getFullYear(), dateB.getMonth(), dateB.getDate());
+  return Math.round((startA - startB) / (24 * 60 * 60 * 1000));
+}
+
+const membershipTypes = ['Prospect', 'Member', 'Voting Member'];
+const genderOptions = ['Male', 'Female', 'Unspecified'];
+
+app.locals.formatDateDMY = formatDateDMY;
+app.locals.membershipTypes = membershipTypes;
+app.locals.genderOptions = genderOptions;
 
 function mapImportRow(row) {
   const joinedAt = toIsoDate(csvField(row, ['joined_at', 'joined at']));
@@ -266,6 +336,7 @@ app.get('/people', async (req, res, next) => {
     const data = await readData();
     const q = normalize(req.query.q).toLowerCase();
     const followups = normalize(req.query.followups) || 'all';
+    const now = new Date();
 
     const openFollowUpsByPerson = data.followUps
       .filter((item) => item.status !== 'completed')
@@ -286,6 +357,7 @@ app.get('/people', async (req, res, next) => {
           person.email,
           person.phone,
           person.sectionId,
+          person.membershipType,
           person.notes
         ]
           .join(' ')
@@ -298,11 +370,37 @@ app.get('/people', async (req, res, next) => {
       people = people.filter((person) => person.openFollowUps > 0);
     }
 
+    const upcomingBirthdays = sortByName(data.people)
+      .map((person) => {
+        const nextBirthday = nextBirthdayDate(person.birthday, now);
+        if (!nextBirthday) return null;
+        return {
+          id: person.id,
+          name: person.name,
+          nextBirthdayIso: nextBirthday.toISOString().slice(0, 10),
+          daysUntil: diffDays(nextBirthday, now)
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.daysUntil - b.daysUntil)
+      .slice(0, 8);
+
     res.render('people', {
       activeTab: 'people',
       people,
       q,
-      followups
+      followups,
+      upcomingBirthdays
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/people/new', async (req, res, next) => {
+  try {
+    res.render('people-new', {
+      activeTab: 'people_new'
     });
   } catch (err) {
     next(err);
@@ -348,11 +446,12 @@ app.post('/people', async (req, res, next) => {
       name: req.body.name?.trim() || '',
       phone: req.body.phone?.trim() || '',
       email: req.body.email?.trim() || '',
-      birthday: req.body.birthday || '',
+      birthday: toIsoDate(req.body.birthday),
       sectionId: req.body.sectionId || '',
       notes: req.body.notes?.trim() || '',
       gender: req.body.gender || '',
       ageGroup: req.body.ageGroup || '',
+      membershipType: req.body.membershipType || '',
       occupation: req.body.occupation || '',
       language: req.body.language || '',
       maritalStatus: req.body.maritalStatus || '',
@@ -367,7 +466,7 @@ app.post('/people', async (req, res, next) => {
     };
 
     if (!person.name) {
-      return res.redirect('/people');
+      return res.redirect('/people/new');
     }
 
     await updateData((data) => {
@@ -399,11 +498,12 @@ app.post('/people/:id', async (req, res, next) => {
         write('name', (value) => value?.trim() || person.name);
         write('phone', (value) => value?.trim() || '');
         write('email', (value) => value?.trim() || '');
-        write('birthday', (value) => value || '');
+        write('birthday', (value) => toIsoDate(value));
         write('sectionId', (value) => value || '');
         write('notes', (value) => value?.trim() || '');
         write('gender', (value) => value || '');
         write('ageGroup', (value) => value || '');
+        write('membershipType', (value) => value || '');
         write('occupation', (value) => value || '');
         write('language', (value) => value || '');
         write('maritalStatus', (value) => value || '');
@@ -657,6 +757,62 @@ app.get('/api/events', async (req, res, next) => {
   try {
     const data = await readData();
     res.json(data.events);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/birthdays', async (req, res, next) => {
+  try {
+    const data = await readData();
+    const start = new Date(req.query.start || `${new Date().getFullYear()}-01-01`);
+    const end = new Date(req.query.end || `${new Date().getFullYear() + 1}-01-01`);
+
+    const startDate = Number.isNaN(start.getTime()) ? new Date(new Date().getFullYear(), 0, 1) : start;
+    const endDate = Number.isNaN(end.getTime()) ? new Date(new Date().getFullYear() + 1, 0, 1) : end;
+
+    const startYear = startDate.getFullYear() - 1;
+    const endYear = endDate.getFullYear() + 1;
+    const events = [];
+
+    data.people.forEach((person) => {
+      const iso = toIsoDate(person.birthday);
+      if (!iso) return;
+
+      const [, monthStr, dayStr] = iso.split('-');
+      const month = Number(monthStr);
+      const day = Number(dayStr);
+
+      for (let year = startYear; year <= endYear; year += 1) {
+        let birthdayDate = new Date(year, month - 1, day);
+
+        if (birthdayDate.getMonth() !== month - 1 || birthdayDate.getDate() !== day) {
+          if (month === 2 && day === 29) {
+            birthdayDate = new Date(year, 1, 28);
+          } else {
+            continue;
+          }
+        }
+
+        if (birthdayDate < startDate || birthdayDate >= endDate) {
+          continue;
+        }
+
+        events.push({
+          id: `birthday-${person.id}-${year}`,
+          title: `${person.name} Birthday`,
+          start: birthdayDate.toISOString().slice(0, 10),
+          allDay: true,
+          color: '#f59e0b',
+          extendedProps: {
+            sourceType: 'birthday',
+            personId: person.id
+          }
+        });
+      }
+    });
+
+    res.json(events);
   } catch (err) {
     next(err);
   }
