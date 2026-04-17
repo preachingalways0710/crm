@@ -1,6 +1,7 @@
 const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
+const session = require('express-session');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const { parse } = require('csv-parse/sync');
@@ -15,6 +16,20 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use('/static', express.static(path.join(__dirname, 'public')));
+app.use(
+  session({
+    name: 'crm.sid',
+    secret: process.env.APP_SECRET || 'dev-only-secret-change-me',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 1000 * 60 * 60 * 12
+    }
+  })
+);
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 }
@@ -219,6 +234,40 @@ app.locals.formatDateDMY = formatDateDMY;
 app.locals.membershipTypes = membershipTypes;
 app.locals.genderOptions = genderOptions;
 
+function isAuthEnabled() {
+  return Boolean(process.env.CRM_ADMIN_PASSWORD);
+}
+
+function safePasswordCompare(input, expected) {
+  const a = Buffer.from(input || '', 'utf-8');
+  const b = Buffer.from(expected || '', 'utf-8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+function isPublicPath(pathname) {
+  return (
+    pathname === '/login' ||
+    pathname.startsWith('/static/') ||
+    pathname.startsWith('/register/')
+  );
+}
+
+app.use((req, res, next) => {
+  res.locals.authEnabled = isAuthEnabled();
+  res.locals.isAuthenticated = Boolean(req.session?.isAuthenticated);
+  next();
+});
+
+app.use((req, res, next) => {
+  if (!isAuthEnabled() || isPublicPath(req.path) || req.session?.isAuthenticated) {
+    return next();
+  }
+
+  const returnTo = encodeURIComponent(req.originalUrl || '/people');
+  return res.redirect(`/login?returnTo=${returnTo}`);
+});
+
 function mapImportRow(row) {
   const joinedAt = toIsoDate(csvField(row, ['joined_at', 'joined at']));
   const createdAt = toIsoDate(csvField(row, ['created_at', 'created at']));
@@ -326,6 +375,47 @@ async function importPeopleRows(rows) {
 
   return { imported, skipped };
 }
+
+app.get('/login', (req, res) => {
+  if (!isAuthEnabled()) {
+    return res.redirect('/people');
+  }
+
+  if (req.session?.isAuthenticated) {
+    return res.redirect('/people');
+  }
+
+  return res.render('login', {
+    returnTo: normalize(req.query.returnTo) || '/people',
+    error: ''
+  });
+});
+
+app.post('/login', (req, res) => {
+  if (!isAuthEnabled()) {
+    return res.redirect('/people');
+  }
+
+  const submitted = normalize(req.body.password);
+  const expected = normalize(process.env.CRM_ADMIN_PASSWORD);
+  const returnTo = normalize(req.body.returnTo) || '/people';
+
+  if (!safePasswordCompare(submitted, expected)) {
+    return res.status(401).render('login', {
+      returnTo,
+      error: 'Invalid password'
+    });
+  }
+
+  req.session.isAuthenticated = true;
+  return res.redirect(returnTo);
+});
+
+app.post('/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.redirect('/login');
+  });
+});
 
 app.get('/', (req, res) => {
   res.redirect('/people');

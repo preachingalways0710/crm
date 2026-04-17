@@ -17,6 +17,13 @@
           <div class="nav-item d-none d-md-flex me-3">
             <span class="badge bg-azure-lt">People + Calendar + Visits</span>
           </div>
+          <% if (authEnabled && isAuthenticated) { %>
+            <div class="nav-item">
+              <form method="post" action="/logout">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">Log out</button>
+              </form>
+            </div>
+          <% } %>
         </div>
       </div>
     </header>

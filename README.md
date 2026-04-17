@@ -39,6 +39,13 @@ Open `http://localhost:3000`.
 
 - `PORT` (default `3000`)
 - `ATTENDANCE_APP_URL` (optional): URL to your existing attendance app to embed in Metrics tab
+- `APP_SECRET` (recommended): session secret for login cookies
+- `CRM_ADMIN_PASSWORD` (recommended): enables login protection for all CRM routes except `/register/*`
+- `DB_HOST` (optional): MySQL host
+- `DB_PORT` (optional, default `3306`): MySQL port
+- `DB_NAME` (optional): MySQL database
+- `DB_USER` (optional): MySQL user
+- `DB_PASSWORD` (optional): MySQL password
 
 ## Hostinger deployment (Node.js Apps)
 
@@ -50,7 +57,7 @@ Open `http://localhost:3000`.
 6. Start/entry file: `server.js`
 7. Deploy.
 
-If using `ATTENDANCE_APP_URL`, set it in Node.js app environment variables in hPanel.
+If using `ATTENDANCE_APP_URL`, DB vars, or login vars, set them in Node.js app environment variables in hPanel.
 
 ## Data backup
 
