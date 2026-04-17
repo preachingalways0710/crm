@@ -41,6 +41,7 @@ Open `http://localhost:3000`.
 - `ATTENDANCE_APP_URL` (optional): URL to your existing attendance app to embed in Metrics tab
 - `APP_SECRET` (recommended): session secret for login cookies
 - `CRM_ADMIN_PASSWORD` (recommended): enables login protection for all CRM routes except `/register/*`
+  - Compatibility aliases also accepted: `ADMIN_PASSWORD`, `APP_PASSWORD`, `PASSWORD`
 - `DB_HOST` (optional): MySQL host
 - `DB_PORT` (optional, default `3306`): MySQL port
 - `DB_NAME` (optional): MySQL database

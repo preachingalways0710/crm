@@ -235,7 +235,27 @@ app.locals.membershipTypes = membershipTypes;
 app.locals.genderOptions = genderOptions;
 
 function isAuthEnabled() {
-  return Boolean(process.env.CRM_ADMIN_PASSWORD);
+  return Boolean(getAuthPassword());
+}
+
+function getAuthPassword() {
+  const candidates = [
+    process.env.CRM_ADMIN_PASSWORD,
+    process.env.ADMIN_PASSWORD,
+    process.env.APP_PASSWORD,
+    process.env.PASSWORD
+  ];
+
+  const first = candidates.find((value) => normalize(value).length > 0);
+  return normalize(first);
+}
+
+function authPasswordSource() {
+  if (normalize(process.env.CRM_ADMIN_PASSWORD)) return 'CRM_ADMIN_PASSWORD';
+  if (normalize(process.env.ADMIN_PASSWORD)) return 'ADMIN_PASSWORD';
+  if (normalize(process.env.APP_PASSWORD)) return 'APP_PASSWORD';
+  if (normalize(process.env.PASSWORD)) return 'PASSWORD';
+  return '';
 }
 
 function safePasswordCompare(input, expected) {
@@ -248,6 +268,7 @@ function safePasswordCompare(input, expected) {
 function isPublicPath(pathname) {
   return (
     pathname === '/login' ||
+    pathname === '/auth-status' ||
     pathname.startsWith('/static/') ||
     pathname.startsWith('/register/')
   );
@@ -397,7 +418,7 @@ app.post('/login', (req, res) => {
   }
 
   const submitted = normalize(req.body.password);
-  const expected = normalize(process.env.CRM_ADMIN_PASSWORD);
+  const expected = getAuthPassword();
   const returnTo = normalize(req.body.returnTo) || '/people';
 
   if (!safePasswordCompare(submitted, expected)) {
@@ -409,6 +430,15 @@ app.post('/login', (req, res) => {
 
   req.session.isAuthenticated = true;
   return res.redirect(returnTo);
+});
+
+app.get('/auth-status', (req, res) => {
+  res.json({
+    authEnabled: isAuthEnabled(),
+    authPasswordSource: authPasswordSource() || null,
+    hasAppSecret: Boolean(normalize(process.env.APP_SECRET)),
+    isAuthenticated: Boolean(req.session?.isAuthenticated)
+  });
 });
 
 app.post('/logout', (req, res) => {
