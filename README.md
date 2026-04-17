@@ -49,6 +49,12 @@ Open `http://localhost:3000`.
 - `DB_NAME` (optional): MySQL database
 - `DB_USER` (optional): MySQL user
 - `DB_PASSWORD` (optional): MySQL password
+- `LEGACY_DB_HOST` (optional): source DB host for legacy attendance import
+- `LEGACY_DB_PORT` (optional): source DB port for legacy attendance import
+- `LEGACY_DB_NAME` (optional): source DB name for legacy attendance import
+- `LEGACY_DB_USER` (optional): source DB user for legacy attendance import
+- `LEGACY_DB_PASSWORD` (optional): source DB password for legacy attendance import
+  - If unset, import falls back to `DB_*`
 
 ## Hostinger deployment (Node.js Apps)
 

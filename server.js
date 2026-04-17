@@ -243,17 +243,28 @@ function hasDbCredentials() {
   );
 }
 
+function getLegacyDbConfig() {
+  return {
+    host: normalize(process.env.LEGACY_DB_HOST) || normalize(process.env.DB_HOST),
+    port: Number(normalize(process.env.LEGACY_DB_PORT) || normalize(process.env.DB_PORT) || 3306),
+    user: normalize(process.env.LEGACY_DB_USER) || normalize(process.env.DB_USER),
+    password: normalize(process.env.LEGACY_DB_PASSWORD) || normalize(process.env.DB_PASSWORD),
+    database: normalize(process.env.LEGACY_DB_NAME) || normalize(process.env.DB_NAME)
+  };
+}
+
 async function readLegacyAttendanceRows() {
-  if (!hasDbCredentials()) {
+  const legacy = getLegacyDbConfig();
+  if (!legacy.host || !legacy.user || !legacy.password || !legacy.database) {
     return { ok: false, reason: 'DB credentials are missing in environment variables.', rows: [] };
   }
 
   const pool = mysql.createPool({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
+    host: legacy.host,
+    port: legacy.port,
+    user: legacy.user,
+    password: legacy.password,
+    database: legacy.database,
     waitForConnections: true,
     connectionLimit: 5
   });
@@ -261,7 +272,7 @@ async function readLegacyAttendanceRows() {
   try {
     const [tables] = await pool.query("SHOW TABLES LIKE 'attendance'");
     if (!tables.length) {
-      return { ok: false, reason: 'Legacy attendance table was not found.', rows: [] };
+      return { ok: false, reason: `Legacy attendance table was not found in database '${legacy.database}'.`, rows: [] };
     }
 
     const [rows] = await pool.query(
