@@ -36,13 +36,18 @@
 </div>
 
 <div class="card">
-  <div class="card-header"><h3 class="card-title">Attendance Integration</h3></div>
+  <div class="card-header"><h3 class="card-title">Metrics App</h3></div>
   <div class="card-body">
-    <% if (attendanceAppUrl) { %>
-      <p class="text-secondary">Embedded from <code>ATTENDANCE_APP_URL</code>.</p>
-      <iframe src="<%= attendanceAppUrl %>" class="embed"></iframe>
+    <% if (metricsAppUrl) { %>
+      <p class="text-secondary">
+        Embedded from <code>METRICS_APP_URL</code> (fallback: <code>ATTENDANCE_APP_URL</code>).
+      </p>
+      <div class="mb-2">
+        <a class="btn btn-outline-secondary btn-sm" href="<%= metricsAppUrl %>" target="_blank" rel="noopener noreferrer">Open in New Tab</a>
+      </div>
+      <iframe src="<%= metricsAppUrl %>" class="embed"></iframe>
     <% } else { %>
-      <p class="text-secondary">Set <code>ATTENDANCE_APP_URL</code> in environment variables to embed your attendance app here.</p>
+      <p class="text-secondary">Set <code>METRICS_APP_URL=https://pessoas.meuibbv.com</code> (or <code>ATTENDANCE_APP_URL</code>) in environment variables to embed your metrics app here.</p>
     <% } %>
   </div>
 </div>

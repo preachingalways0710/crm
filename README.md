@@ -38,6 +38,7 @@ Open `http://localhost:3000`.
 ## Environment variables
 
 - `PORT` (default `3000`)
+- `METRICS_APP_URL` (recommended): URL for your metrics app tab (example: `https://pessoas.meuibbv.com`)
 - `ATTENDANCE_APP_URL` (optional): URL to your existing attendance app to embed in Metrics tab
 - `APP_SECRET` (recommended): session secret for login cookies
 - `CRM_ADMIN_PASSWORD` (recommended): enables login protection for all CRM routes except `/register/*`
@@ -58,7 +59,7 @@ Open `http://localhost:3000`.
 6. Start/entry file: `server.js`
 7. Deploy.
 
-If using `ATTENDANCE_APP_URL`, DB vars, or login vars, set them in Node.js app environment variables in hPanel.
+If using `METRICS_APP_URL` (or `ATTENDANCE_APP_URL`), DB vars, or login vars, set them in Node.js app environment variables in hPanel.
 
 ## Data backup
 

@@ -834,7 +834,10 @@ app.post('/followups/:followUpId/reopen', async (req, res, next) => {
 app.get('/metrics', async (req, res, next) => {
   try {
     const data = await readData();
-    const attendanceAppUrl = process.env.ATTENDANCE_APP_URL || data.settings.attendanceAppUrl;
+    const metricsAppUrl =
+      process.env.METRICS_APP_URL ||
+      process.env.ATTENDANCE_APP_URL ||
+      data.settings.attendanceAppUrl;
 
     const now = new Date();
     const totalPeople = data.people.length;
@@ -852,7 +855,7 @@ app.get('/metrics', async (req, res, next) => {
 
     res.render('metrics', {
       activeTab: 'metrics',
-      attendanceAppUrl,
+      metricsAppUrl,
       totalPeople,
       birthdaysThisMonth,
       upcomingEvents: data.events.length,
