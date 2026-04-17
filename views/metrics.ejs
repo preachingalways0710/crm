@@ -35,21 +35,182 @@
   </div>
 </div>
 
-<div class="card">
-  <div class="card-header"><h3 class="card-title">Metrics App</h3></div>
-  <div class="card-body">
-    <% if (metricsAppUrl) { %>
-      <p class="text-secondary">
-        Embedded from <code>METRICS_APP_URL</code> (fallback: <code>ATTENDANCE_APP_URL</code>).
-      </p>
-      <div class="mb-2">
-        <a class="btn btn-outline-secondary btn-sm" href="<%= metricsAppUrl %>" target="_blank" rel="noopener noreferrer">Open in New Tab</a>
+<div class="row g-3 mb-3">
+  <div class="col-12 col-lg-8">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h3 class="card-title m-0">Attendance Dashboard</h3>
+        <div class="d-flex align-items-center gap-2">
+          <form method="get" action="/metrics" class="d-flex align-items-center gap-2">
+            <label class="form-label m-0" for="yearSelect">Year</label>
+            <select id="yearSelect" class="form-select form-select-sm" name="year" onchange="this.form.submit()">
+              <% years.forEach((value) => { %>
+                <option value="<%= value %>" <%= value === year ? 'selected' : '' %>><%= value %></option>
+              <% }) %>
+            </select>
+          </form>
+          <a class="btn btn-primary btn-sm" href="/metrics/entry">+ Add Record</a>
+        </div>
       </div>
-      <iframe src="<%= metricsAppUrl %>" class="embed"></iframe>
-    <% } else { %>
-      <p class="text-secondary">Set <code>METRICS_APP_URL=https://pessoas.meuibbv.com</code> (or <code>ATTENDANCE_APP_URL</code>) in environment variables to embed your metrics app here.</p>
+      <div class="card-body">
+        <div class="row g-2 mb-3">
+          <% ['wed', 'sun_am', 'sun_pm'].forEach((type) => { %>
+            <% const metric = averages[type]; %>
+            <div class="col-12 col-md-4">
+              <div class="border rounded p-2">
+                <div class="text-secondary"><%= serviceTypeLabels[type] %></div>
+                <div class="h2 mb-0"><%= metric.avg ?? '—' %></div>
+                <div class="text-secondary small">avg · <%= metric.count %> services</div>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+
+        <div class="row g-2 mb-3">
+          <div class="col-6">
+            <div class="text-secondary small">Services in <%= year %></div>
+            <div class="h3"><%= attendanceThisYear %></div>
+          </div>
+          <div class="col-6">
+            <div class="text-secondary small">Total Headcount in <%= year %></div>
+            <div class="h3"><%= attendanceTotalHeadcount %></div>
+          </div>
+        </div>
+
+        <canvas id="attendanceChart" height="120"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-4">
+    <div class="card">
+      <div class="card-header"><h3 class="card-title">Records</h3></div>
+      <div class="table-responsive">
+        <table class="table table-vcenter">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Service</th>
+              <th>Count</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% if (!recent.length) { %>
+              <tr><td colspan="4" class="text-secondary">No records yet.</td></tr>
+            <% } %>
+            <% recent.forEach((row) => { %>
+              <tr>
+                <td><%= row.serviceDate %></td>
+                <td><span class="badge bg-azure-lt"><%= serviceTypeLabels[row.serviceType] %></span></td>
+                <td><strong><%= row.headcount %></strong></td>
+                <td>
+                  <div class="d-flex gap-1">
+                    <a class="btn btn-sm btn-outline-primary" href="/metrics/entry/<%= row.id %>/edit">Edit</a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteAttendanceRecord('<%= row.id %>', this)">Delete</button>
+                  </div>
+                </td>
+              </tr>
+              <% if (row.note) { %>
+                <tr>
+                  <td colspan="4" class="text-secondary small">Note: <%= row.note %></td>
+                </tr>
+              <% } %>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <% if (metricsAppUrl) { %>
+      <div class="card mt-3">
+        <div class="card-header"><h3 class="card-title">Legacy Metrics App</h3></div>
+        <div class="card-body">
+          <p class="text-secondary">Your old standalone app is still available if needed.</p>
+          <a class="btn btn-outline-secondary" href="<%= metricsAppUrl %>" target="_blank" rel="noopener noreferrer">Open Legacy App</a>
+        </div>
+      </div>
     <% } %>
   </div>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script>
+  const chartData = <%- JSON.stringify(chartData) %>;
+
+  const chartCanvas = document.getElementById('attendanceChart');
+  if (chartCanvas) {
+    const ctx = chartCanvas.getContext('2d');
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [
+          {
+            label: 'Wednesday',
+            data: chartData.wed,
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99, 102, 241, 0.08)',
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            tension: 0.3,
+            fill: false
+          },
+          {
+            label: 'Sunday AM',
+            data: chartData.sun_am,
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.08)',
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            tension: 0.3,
+            fill: false
+          },
+          {
+            label: 'Sunday PM',
+            data: chartData.sun_pm,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245, 158, 11, 0.08)',
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            tension: 0.3,
+            fill: false
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top' }
+        },
+        scales: {
+          x: {
+            type: 'time',
+            time: { unit: 'month', tooltipFormat: 'MMM d, yyyy' }
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { stepSize: 10 }
+          }
+        }
+      }
+    });
+  }
+
+  async function deleteAttendanceRecord(id, button) {
+    if (!window.confirm('Delete this record?')) return;
+    button.disabled = true;
+
+    const response = await fetch(`/api/metrics/attendance/${id}/delete`, { method: 'POST' });
+    if (response.ok) {
+      window.location.reload();
+      return;
+    }
+
+    window.alert('Could not delete record.');
+    button.disabled = false;
+  }
+</script>
 
 <%- include('partials-footer') %>

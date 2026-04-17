@@ -228,12 +228,24 @@ function diffDays(dateA, dateB) {
   return Math.round((startA - startB) / (24 * 60 * 60 * 1000));
 }
 
+function normalizeServiceType(value) {
+  const serviceType = normalize(value);
+  return ['wed', 'sun_am', 'sun_pm'].includes(serviceType) ? serviceType : 'sun_am';
+}
+
 const membershipTypes = ['Prospect', 'Member', 'Voting Member'];
 const genderOptions = ['Male', 'Female', 'Unspecified'];
+const serviceTypes = ['wed', 'sun_am', 'sun_pm'];
+const serviceTypeLabels = {
+  wed: 'Wednesday',
+  sun_am: 'Sunday AM',
+  sun_pm: 'Sunday PM'
+};
 
 app.locals.formatDateDMY = formatDateDMY;
 app.locals.membershipTypes = membershipTypes;
 app.locals.genderOptions = genderOptions;
+app.locals.serviceTypeLabels = serviceTypeLabels;
 
 function isAuthEnabled() {
   return Boolean(getAuthPassword());
@@ -834,13 +846,16 @@ app.post('/followups/:followUpId/reopen', async (req, res, next) => {
 app.get('/metrics', async (req, res, next) => {
   try {
     const data = await readData();
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const selectedYear = Number.parseInt(req.query.year, 10);
+    const year = Number.isNaN(selectedYear) ? currentYear : selectedYear;
+    const totalPeople = data.people.length;
     const metricsAppUrl =
       process.env.METRICS_APP_URL ||
       process.env.ATTENDANCE_APP_URL ||
       data.settings.attendanceAppUrl;
 
-    const now = new Date();
-    const totalPeople = data.people.length;
     const birthdaysThisMonth = data.people.filter((person) => {
       if (!person.birthday) return false;
       return new Date(person.birthday).getMonth() === now.getMonth();
@@ -852,16 +867,219 @@ app.get('/metrics', async (req, res, next) => {
     }).length;
 
     const openFollowUps = data.followUps.filter((entry) => entry.status !== 'completed').length;
+    const normalizedAttendance = (data.attendanceRecords || [])
+      .map((record) => ({
+        id: record.id,
+        serviceDate: toIsoDate(record.serviceDate),
+        serviceType: normalizeServiceType(record.serviceType),
+        headcount: Number(record.headcount) || 0,
+        note: normalize(record.note),
+        createdAt: record.createdAt || '',
+        updatedAt: record.updatedAt || ''
+      }))
+      .filter((record) => record.serviceDate);
+
+    const yearRecords = normalizedAttendance
+      .filter((record) => new Date(record.serviceDate).getFullYear() === year)
+      .sort((a, b) => {
+        if (a.serviceDate === b.serviceDate) {
+          return a.serviceType.localeCompare(b.serviceType);
+        }
+        return a.serviceDate.localeCompare(b.serviceDate);
+      });
+
+    const years = Array.from(
+      new Set(normalizedAttendance.map((record) => new Date(record.serviceDate).getFullYear()))
+    ).sort((a, b) => b - a);
+    if (!years.includes(year)) {
+      years.unshift(year);
+    }
+
+    const recent = [...normalizedAttendance]
+      .sort((a, b) => {
+        if (a.serviceDate === b.serviceDate) {
+          return a.serviceType.localeCompare(b.serviceType);
+        }
+        return b.serviceDate.localeCompare(a.serviceDate);
+      })
+      .slice(0, 15);
+
+    const avgBuckets = serviceTypes.reduce((acc, type) => {
+      const rows = yearRecords.filter((record) => record.serviceType === type);
+      const total = rows.reduce((sum, row) => sum + row.headcount, 0);
+      acc[type] = {
+        avg: rows.length ? Math.round(total / rows.length) : null,
+        count: rows.length
+      };
+      return acc;
+    }, {});
+
+    const chartData = {
+      wed: yearRecords
+        .filter((record) => record.serviceType === 'wed')
+        .map((record) => ({ x: record.serviceDate, y: record.headcount })),
+      sun_am: yearRecords
+        .filter((record) => record.serviceType === 'sun_am')
+        .map((record) => ({ x: record.serviceDate, y: record.headcount })),
+      sun_pm: yearRecords
+        .filter((record) => record.serviceType === 'sun_pm')
+        .map((record) => ({ x: record.serviceDate, y: record.headcount }))
+    };
+
+    const attendanceThisYear = yearRecords.length;
+    const attendanceTotalHeadcount = yearRecords.reduce((sum, row) => sum + row.headcount, 0);
 
     res.render('metrics', {
       activeTab: 'metrics',
       metricsAppUrl,
+      year,
+      years,
+      chartData,
+      recent,
+      averages: avgBuckets,
+      attendanceThisYear,
+      attendanceTotalHeadcount,
       totalPeople,
       birthdaysThisMonth,
       upcomingEvents: data.events.length,
       visitsThisMonth,
       openFollowUps
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/metrics/entry', async (req, res, next) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const dayOfWeek = new Date().getDay();
+
+    let suggestedType = 'sun_am';
+    if (dayOfWeek === 3) suggestedType = 'wed';
+    else if (dayOfWeek === 0) suggestedType = 'sun_am';
+
+    res.render('metrics-entry', {
+      activeTab: 'metrics',
+      record: null,
+      date: toIsoDate(req.query.date || today) || today,
+      type: normalizeServiceType(req.query.type || suggestedType),
+      error: ''
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/metrics/entry/:id/edit', async (req, res, next) => {
+  try {
+    const data = await readData();
+    const record = (data.attendanceRecords || []).find((entry) => entry.id === req.params.id);
+    if (!record) {
+      return res.redirect('/metrics');
+    }
+
+    res.render('metrics-entry', {
+      activeTab: 'metrics',
+      record,
+      date: toIsoDate(record.serviceDate),
+      type: normalizeServiceType(record.serviceType),
+      error: ''
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/metrics/entry', async (req, res, next) => {
+  try {
+    const serviceDate = toIsoDate(req.body.service_date);
+    const serviceType = normalizeServiceType(req.body.service_type);
+    const headcount = Number.parseInt(req.body.headcount, 10);
+    const note = normalize(req.body.note);
+
+    if (!serviceDate || Number.isNaN(headcount) || headcount < 0) {
+      return res.status(400).render('metrics-entry', {
+        activeTab: 'metrics',
+        record: null,
+        date: serviceDate || normalize(req.body.service_date),
+        type: serviceType,
+        error: 'Date, service type, and a non-negative headcount are required.'
+      });
+    }
+
+    await updateData((data) => {
+      const existing = (data.attendanceRecords || []).find(
+        (row) => toIsoDate(row.serviceDate) === serviceDate && normalizeServiceType(row.serviceType) === serviceType
+      );
+
+      if (existing) {
+        existing.headcount = headcount;
+        existing.note = note;
+        existing.updatedAt = new Date().toISOString();
+      } else {
+        data.attendanceRecords = data.attendanceRecords || [];
+        data.attendanceRecords.push({
+          id: id(),
+          serviceDate,
+          serviceType,
+          headcount,
+          note,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+      return data;
+    });
+
+    return res.redirect(`/metrics?year=${new Date(serviceDate).getFullYear()}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/metrics/entry/:id/update', async (req, res, next) => {
+  try {
+    const serviceDate = toIsoDate(req.body.service_date);
+    const serviceType = normalizeServiceType(req.body.service_type);
+    const headcount = Number.parseInt(req.body.headcount, 10);
+    const note = normalize(req.body.note);
+
+    if (!serviceDate || Number.isNaN(headcount) || headcount < 0) {
+      return res.status(400).render('metrics-entry', {
+        activeTab: 'metrics',
+        record: { id: req.params.id, serviceDate, serviceType, headcount: req.body.headcount, note },
+        date: serviceDate || normalize(req.body.service_date),
+        type: serviceType,
+        error: 'Date, service type, and a non-negative headcount are required.'
+      });
+    }
+
+    await updateData((data) => {
+      const row = (data.attendanceRecords || []).find((entry) => entry.id === req.params.id);
+      if (row) {
+        row.serviceDate = serviceDate;
+        row.serviceType = serviceType;
+        row.headcount = headcount;
+        row.note = note;
+        row.updatedAt = new Date().toISOString();
+      }
+      return data;
+    });
+
+    return res.redirect(`/metrics?year=${new Date(serviceDate).getFullYear()}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/metrics/attendance/:id/delete', async (req, res, next) => {
+  try {
+    await updateData((data) => {
+      data.attendanceRecords = (data.attendanceRecords || []).filter((entry) => entry.id !== req.params.id);
+      return data;
+    });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

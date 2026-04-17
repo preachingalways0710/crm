@@ -1,0 +1,49 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="mb-3">
+  <a href="/metrics" class="btn btn-ghost-secondary btn-sm"><i class="bi bi-arrow-left"></i> Back to Metrics</a>
+</div>
+
+<div class="card" style="max-width: 720px;">
+  <div class="card-header">
+    <h3 class="card-title"><%= record ? 'Edit Attendance Record' : 'Add Attendance Record' %></h3>
+  </div>
+  <div class="card-body">
+    <% if (error) { %>
+      <div class="alert alert-danger" role="alert"><%= error %></div>
+    <% } %>
+
+    <form method="post" action="<%= record ? `/metrics/entry/${record.id}/update` : '/metrics/entry' %>" class="row g-2">
+      <div class="col-12 col-md-4">
+        <label class="form-label">Date</label>
+        <input class="form-control" type="date" name="service_date" value="<%= date %>" required />
+      </div>
+
+      <div class="col-12 col-md-4">
+        <label class="form-label">Service</label>
+        <select class="form-select" name="service_type" required>
+          <% ['wed', 'sun_am', 'sun_pm'].forEach((key) => { %>
+            <option value="<%= key %>" <%= type === key ? 'selected' : '' %>><%= serviceTypeLabels[key] %></option>
+          <% }) %>
+        </select>
+      </div>
+
+      <div class="col-12 col-md-4">
+        <label class="form-label">Headcount</label>
+        <input class="form-control" type="number" name="headcount" min="0" max="9999" value="<%= record ? record.headcount : '' %>" required />
+      </div>
+
+      <div class="col-12">
+        <label class="form-label">Message / Note (optional)</label>
+        <input class="form-control" type="text" name="note" maxlength="500" value="<%= record ? (record.note || '') : '' %>" placeholder="e.g. Romans 8:1-5" />
+      </div>
+
+      <div class="col-12 d-flex gap-2 mt-2">
+        <button class="btn btn-primary" type="submit"><%= record ? 'Save Changes' : 'Save Record' %></button>
+        <a class="btn btn-outline-secondary" href="/metrics">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<%- include('partials-footer') %>

@@ -8,7 +8,7 @@ A focused, self-hosted church operations interface for:
 - Global follow-up queue
 - CSV and Excel people import (XLS/XLSX export migration)
 - Membership type classification (Prospect, Member, Voting Member)
-- Metrics and attendance integration
+- Integrated attendance metrics module (yearly chart, entry form, recent records)
 - Yearly calendar planning
 - Calendar birthday overlay toggle
 - Registration forms (starter level)
@@ -38,8 +38,8 @@ Open `http://localhost:3000`.
 ## Environment variables
 
 - `PORT` (default `3000`)
-- `METRICS_APP_URL` (recommended): URL for your metrics app tab (example: `https://pessoas.meuibbv.com`)
-- `ATTENDANCE_APP_URL` (optional): URL to your existing attendance app to embed in Metrics tab
+- `METRICS_APP_URL` (optional): URL to your legacy metrics app (shows as backup link in Metrics tab)
+- `ATTENDANCE_APP_URL` (optional fallback): legacy metrics URL if `METRICS_APP_URL` is unset
 - `APP_SECRET` (recommended): session secret for login cookies
 - `CRM_ADMIN_PASSWORD` (recommended): enables login protection for all CRM routes except `/register/*`
   - Compatibility aliases also accepted: `ADMIN_PASSWORD`, `APP_PASSWORD`, `PASSWORD`
