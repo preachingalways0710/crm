@@ -9,7 +9,7 @@ A focused, self-hosted church operations interface for:
 - CSV and Excel people import (XLS/XLSX export migration)
 - Membership type classification (Prospect, Member, Voting Member)
 - Integrated attendance metrics module (yearly chart, entry form, recent records)
-- One-click legacy attendance import from existing MySQL `attendance` table
+- One-click legacy attendance import by scraping existing metrics app pages
 - Yearly calendar planning
 - Calendar birthday overlay toggle
 - Registration forms (starter level)
@@ -41,6 +41,8 @@ Open `http://localhost:3000`.
 - `PORT` (default `3000`)
 - `METRICS_APP_URL` (optional): URL to your legacy metrics app (shows as backup link in Metrics tab)
 - `ATTENDANCE_APP_URL` (optional fallback): legacy metrics URL if `METRICS_APP_URL` is unset
+- `LEGACY_APP_PASSWORD` (optional): password used to sign in to legacy metrics app during import
+  - Compatibility aliases also accepted: `LEGACY_ADMIN_PASSWORD`, `ATTENDANCE_APP_PASSWORD`, `ADMIN_PASSWORD`
 - `APP_SECRET` (recommended): session secret for login cookies
 - `CRM_ADMIN_PASSWORD` (recommended): enables login protection for all CRM routes except `/register/*`
   - Compatibility aliases also accepted: `ADMIN_PASSWORD`, `APP_PASSWORD`, `PASSWORD`
@@ -49,12 +51,6 @@ Open `http://localhost:3000`.
 - `DB_NAME` (optional): MySQL database
 - `DB_USER` (optional): MySQL user
 - `DB_PASSWORD` (optional): MySQL password
-- `LEGACY_DB_HOST` (optional): source DB host for legacy attendance import
-- `LEGACY_DB_PORT` (optional): source DB port for legacy attendance import
-- `LEGACY_DB_NAME` (optional): source DB name for legacy attendance import
-- `LEGACY_DB_USER` (optional): source DB user for legacy attendance import
-- `LEGACY_DB_PASSWORD` (optional): source DB password for legacy attendance import
-  - If unset, import falls back to `DB_*`
 
 ## Hostinger deployment (Node.js Apps)
 
@@ -66,7 +62,7 @@ Open `http://localhost:3000`.
 6. Start/entry file: `server.js`
 7. Deploy.
 
-If using `METRICS_APP_URL` (or `ATTENDANCE_APP_URL`), DB vars, or login vars, set them in Node.js app environment variables in hPanel.
+If using `METRICS_APP_URL` (or `ATTENDANCE_APP_URL`), `LEGACY_APP_PASSWORD`, DB vars, or login vars, set them in Node.js app environment variables in hPanel.
 
 ## Data backup
 

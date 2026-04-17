@@ -3,8 +3,8 @@ const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
-const mysql = require('mysql2/promise');
 const XLSX = require('xlsx');
+const cheerio = require('cheerio');
 const { parse } = require('csv-parse/sync');
 const { readData, updateData } = require('./lib/dataStore');
 
@@ -234,56 +234,356 @@ function normalizeServiceType(value) {
   return ['wed', 'sun_am', 'sun_pm'].includes(serviceType) ? serviceType : 'sun_am';
 }
 
-function hasDbCredentials() {
-  return Boolean(
-    normalize(process.env.DB_HOST) &&
-      normalize(process.env.DB_NAME) &&
-      normalize(process.env.DB_USER) &&
-      normalize(process.env.DB_PASSWORD)
-  );
+function getLegacyAppUrl() {
+  return normalize(process.env.METRICS_APP_URL) || normalize(process.env.ATTENDANCE_APP_URL);
 }
 
-function getLegacyDbConfig() {
+function getLegacyAppPassword() {
+  const candidates = [
+    process.env.LEGACY_APP_PASSWORD,
+    process.env.LEGACY_ADMIN_PASSWORD,
+    process.env.ATTENDANCE_APP_PASSWORD,
+    process.env.ADMIN_PASSWORD,
+    process.env.CRM_ADMIN_PASSWORD,
+    process.env.APP_PASSWORD,
+    process.env.PASSWORD
+  ];
+  const first = candidates.find((value) => normalize(value).length > 0);
+  return normalize(first);
+}
+
+function getSetCookieHeaders(headers) {
+  if (!headers) return [];
+
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+
+  const headerValue = headers.get('set-cookie');
+  if (!headerValue) return [];
+  return [headerValue];
+}
+
+function parseCookiePairs(rawSetCookie) {
+  const pairs = [];
+  const value = normalize(rawSetCookie);
+  if (!value) return pairs;
+
+  const directPair = value.split(';')[0];
+  if (directPair.includes('=')) {
+    pairs.push(directPair.trim());
+  }
+
+  const pattern = /(?:^|,\s*)([^=,\s;]+)=([^;,\r\n]*)/g;
+  let match;
+  while ((match = pattern.exec(value)) !== null) {
+    const cookieName = normalize(match[1]);
+    const cookieValue = normalize(match[2]);
+    if (!cookieName) continue;
+    const pair = `${cookieName}=${cookieValue}`;
+    if (!pairs.includes(pair)) {
+      pairs.push(pair);
+    }
+  }
+
+  return pairs;
+}
+
+function mergeCookieHeader(existingHeader, setCookieHeaders) {
+  const cookieMap = new Map();
+
+  normalize(existingHeader)
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((pair) => {
+      const separatorIndex = pair.indexOf('=');
+      if (separatorIndex <= 0) return;
+      const key = pair.slice(0, separatorIndex).trim();
+      const value = pair.slice(separatorIndex + 1).trim();
+      if (key) cookieMap.set(key, value);
+    });
+
+  (setCookieHeaders || []).forEach((setCookie) => {
+    parseCookiePairs(setCookie).forEach((pair) => {
+      const separatorIndex = pair.indexOf('=');
+      if (separatorIndex <= 0) return;
+      const key = pair.slice(0, separatorIndex).trim();
+      const value = pair.slice(separatorIndex + 1).trim();
+      if (key) cookieMap.set(key, value);
+    });
+  });
+
+  return Array.from(cookieMap.entries())
+    .map(([key, value]) => `${key}=${value}`)
+    .join('; ');
+}
+
+async function legacyFetch(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchLegacyHtml(url, cookieHeader = '', redirectsLeft = 5) {
+  const headers = {
+    Accept: 'text/html,application/xhtml+xml',
+    ...(cookieHeader ? { Cookie: cookieHeader } : {})
+  };
+
+  const response = await legacyFetch(url, {
+    method: 'GET',
+    headers,
+    redirect: 'manual'
+  });
+
+  let updatedCookieHeader = mergeCookieHeader(cookieHeader, getSetCookieHeaders(response.headers));
+  const location = response.headers.get('location');
+  const isRedirect = response.status >= 300 && response.status < 400 && location;
+
+  if (isRedirect && redirectsLeft > 0) {
+    const nextUrl = new URL(location, url).toString();
+    return fetchLegacyHtml(nextUrl, updatedCookieHeader, redirectsLeft - 1);
+  }
+
+  const html = await response.text();
   return {
-    host: normalize(process.env.LEGACY_DB_HOST) || normalize(process.env.DB_HOST),
-    port: Number(normalize(process.env.LEGACY_DB_PORT) || normalize(process.env.DB_PORT) || 3306),
-    user: normalize(process.env.LEGACY_DB_USER) || normalize(process.env.DB_USER),
-    password: normalize(process.env.LEGACY_DB_PASSWORD) || normalize(process.env.DB_PASSWORD),
-    database: normalize(process.env.LEGACY_DB_NAME) || normalize(process.env.DB_NAME)
+    html,
+    status: response.status,
+    cookieHeader: updatedCookieHeader
   };
 }
 
-async function readLegacyAttendanceRows() {
-  const legacy = getLegacyDbConfig();
-  if (!legacy.host || !legacy.user || !legacy.password || !legacy.database) {
-    return { ok: false, reason: 'DB credentials are missing in environment variables.', rows: [] };
+function parseLegacyServiceType(value) {
+  const raw = normalize(value).toLowerCase();
+  if (!raw) return '';
+
+  if (['wed', 'wednesday'].includes(raw)) return 'wed';
+  if (['sun_am', 'sun am', 'sunday am', 'sunday_am'].includes(raw)) return 'sun_am';
+  if (['sun_pm', 'sun pm', 'sunday pm', 'sunday_pm'].includes(raw)) return 'sun_pm';
+
+  if (raw.includes('wed')) return 'wed';
+  if (raw.includes('sun') && raw.includes('pm')) return 'sun_pm';
+  if (raw.includes('sun') && raw.includes('am')) return 'sun_am';
+
+  return '';
+}
+
+function addLegacyRow(rowsMap, row) {
+  const serviceDate = toIsoDate(row.serviceDate);
+  const serviceType = parseLegacyServiceType(row.serviceType);
+  const headcount = Number.parseInt(row.headcount, 10);
+  const note = normalize(row.note);
+
+  if (!serviceDate || !serviceType || Number.isNaN(headcount) || headcount < 0) {
+    return;
   }
 
-  const pool = mysql.createPool({
-    host: legacy.host,
-    port: legacy.port,
-    user: legacy.user,
-    password: legacy.password,
-    database: legacy.database,
-    waitForConnections: true,
-    connectionLimit: 5
+  const key = `${serviceDate}|${serviceType}`;
+  const existing = rowsMap.get(key);
+  if (existing) {
+    existing.headcount = headcount;
+    if (note) {
+      existing.note = note;
+    }
+    return;
+  }
+
+  rowsMap.set(key, {
+    serviceDate,
+    serviceType,
+    headcount,
+    note
+  });
+}
+
+function parseLegacyAttendancePage(html) {
+  const $ = cheerio.load(html || '');
+  const rowsMap = new Map();
+  const years = $('#year option')
+    .map((index, option) => {
+      const raw = normalize($(option).attr('value') || $(option).text());
+      return Number.parseInt(raw, 10);
+    })
+    .get()
+    .filter((value) => Number.isInteger(value));
+
+  const chartScript = $('script')
+    .map((index, script) => $(script).html() || '')
+    .get()
+    .find((content) => content.includes('const chartData ='));
+
+  if (chartScript) {
+    const chartMatch = chartScript.match(/const\s+chartData\s*=\s*(\{[\s\S]*?\})\s*;/);
+    if (chartMatch) {
+      try {
+        const parsed = JSON.parse(chartMatch[1]);
+        ['wed', 'sun_am', 'sun_pm'].forEach((serviceType) => {
+          const points = Array.isArray(parsed[serviceType]) ? parsed[serviceType] : [];
+          points.forEach((point) => {
+            addLegacyRow(rowsMap, {
+              serviceDate: point.x,
+              serviceType,
+              headcount: point.y,
+              note: ''
+            });
+          });
+        });
+      } catch (error) {
+        // Ignore chart parse errors and continue with table parsing.
+      }
+    }
+  }
+
+  $('table tbody tr').each((index, row) => {
+    const cells = $(row).find('td');
+    if (cells.length < 3) return;
+
+    const badgeClass = normalize($(cells[1]).find('.badge').attr('class') || '');
+    const badgeTypeMatch = badgeClass.match(/badge-(wed|sun_am|sun_pm)/);
+    const fallbackType = normalize($(cells[1]).text());
+    const serviceType = badgeTypeMatch ? badgeTypeMatch[1] : parseLegacyServiceType(fallbackType);
+
+    addLegacyRow(rowsMap, {
+      serviceDate: normalize($(cells[0]).text()),
+      serviceType,
+      headcount: normalize($(cells[2]).text()).replace(/[^\d-]/g, ''),
+      note: cells.length > 3 ? normalize($(cells[3]).text()) : ''
+    });
   });
 
+  const hasLoginForm = $('form[action="/login"], form[action*="login"]').length > 0;
+  const hasPasswordError = /incorrect password/i.test($.text());
+  const requiresLogin = hasLoginForm || hasPasswordError;
+
+  return {
+    rows: Array.from(rowsMap.values()),
+    years: Array.from(new Set(years)),
+    requiresLogin,
+    hasPasswordError
+  };
+}
+
+function mergeLegacyRows(targetMap, rows) {
+  (rows || []).forEach((row) => addLegacyRow(targetMap, row));
+}
+
+async function readLegacyAttendanceRowsByScrape() {
+  const legacyUrl = getLegacyAppUrl();
+  if (!legacyUrl) {
+    return {
+      ok: false,
+      reason: 'Set METRICS_APP_URL (or ATTENDANCE_APP_URL) before importing legacy data.',
+      rows: []
+    };
+  }
+
+  let rootUrl;
+  let loginUrl;
   try {
-    const [tables] = await pool.query("SHOW TABLES LIKE 'attendance'");
-    if (!tables.length) {
-      return { ok: false, reason: `Legacy attendance table was not found in database '${legacy.database}'.`, rows: [] };
+    rootUrl = new URL('/', legacyUrl).toString();
+    loginUrl = new URL('/login', legacyUrl).toString();
+  } catch (error) {
+    return { ok: false, reason: 'Legacy metrics URL is invalid.', rows: [] };
+  }
+
+  try {
+    let cookieHeader = '';
+    let dashboard = await fetchLegacyHtml(rootUrl, cookieHeader);
+    cookieHeader = dashboard.cookieHeader;
+
+    let parsed = parseLegacyAttendancePage(dashboard.html);
+    if (!parsed.rows.length || parsed.requiresLogin) {
+      const legacyPassword = getLegacyAppPassword();
+      if (!legacyPassword) {
+        return {
+          ok: false,
+          reason: 'Legacy app needs login. Set LEGACY_APP_PASSWORD (or reuse ADMIN_PASSWORD) and try again.',
+          rows: []
+        };
+      }
+
+      const loginResponse = await legacyFetch(loginUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'text/html,application/xhtml+xml',
+          ...(cookieHeader ? { Cookie: cookieHeader } : {})
+        },
+        body: new URLSearchParams({ password: legacyPassword }).toString(),
+        redirect: 'manual'
+      });
+
+      cookieHeader = mergeCookieHeader(cookieHeader, getSetCookieHeaders(loginResponse.headers));
+      const redirectTo = loginResponse.headers.get('location');
+
+      if (redirectTo) {
+        const afterLoginUrl = new URL(redirectTo, loginUrl).toString();
+        dashboard = await fetchLegacyHtml(afterLoginUrl, cookieHeader);
+      } else {
+        const postLoginHtml = await loginResponse.text();
+        dashboard = {
+          html: postLoginHtml,
+          status: loginResponse.status,
+          cookieHeader
+        };
+      }
+
+      cookieHeader = dashboard.cookieHeader;
+      parsed = parseLegacyAttendancePage(dashboard.html);
+      if (parsed.hasPasswordError || (parsed.requiresLogin && !parsed.rows.length)) {
+        return {
+          ok: false,
+          reason: 'Legacy login failed. Check LEGACY_APP_PASSWORD (or ADMIN_PASSWORD) value.',
+          rows: []
+        };
+      }
     }
 
-    const [rows] = await pool.query(
-      `SELECT id, service_date AS serviceDate, service_type AS serviceType, headcount, note, created_at AS createdAt
-       FROM attendance
-       ORDER BY service_date, service_type`
-    );
+    const mergedRows = new Map();
+    mergeLegacyRows(mergedRows, parsed.rows);
+
+    for (const year of parsed.years) {
+      const yearUrl = new URL(rootUrl);
+      yearUrl.searchParams.set('year', String(year));
+
+      const yearPage = await fetchLegacyHtml(yearUrl.toString(), cookieHeader);
+      cookieHeader = yearPage.cookieHeader;
+
+      const yearParsed = parseLegacyAttendancePage(yearPage.html);
+      if (yearParsed.requiresLogin && !yearParsed.rows.length) {
+        continue;
+      }
+      mergeLegacyRows(mergedRows, yearParsed.rows);
+    }
+
+    const rows = Array.from(mergedRows.values()).sort((a, b) => {
+      if (a.serviceDate === b.serviceDate) {
+        return a.serviceType.localeCompare(b.serviceType);
+      }
+      return a.serviceDate.localeCompare(b.serviceDate);
+    });
+
+    if (!rows.length) {
+      return {
+        ok: false,
+        reason: 'No attendance rows were found on the legacy metrics pages.',
+        rows: []
+      };
+    }
 
     return { ok: true, reason: '', rows };
-  } finally {
-    await pool.end();
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `Could not scrape legacy app: ${error.message}`,
+      rows: []
+    };
   }
 }
 
@@ -1149,7 +1449,7 @@ app.post('/api/metrics/attendance/:id/delete', async (req, res, next) => {
 
 app.post('/metrics/import-legacy', async (req, res, next) => {
   try {
-    const legacy = await readLegacyAttendanceRows();
+    const legacy = await readLegacyAttendanceRowsByScrape();
     if (!legacy.ok) {
       const params = new URLSearchParams({
         legacyMessage: legacy.reason,
