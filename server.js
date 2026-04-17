@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
+const mysql = require('mysql2/promise');
 const XLSX = require('xlsx');
 const { parse } = require('csv-parse/sync');
 const { readData, updateData } = require('./lib/dataStore');
@@ -231,6 +232,48 @@ function diffDays(dateA, dateB) {
 function normalizeServiceType(value) {
   const serviceType = normalize(value);
   return ['wed', 'sun_am', 'sun_pm'].includes(serviceType) ? serviceType : 'sun_am';
+}
+
+function hasDbCredentials() {
+  return Boolean(
+    normalize(process.env.DB_HOST) &&
+      normalize(process.env.DB_NAME) &&
+      normalize(process.env.DB_USER) &&
+      normalize(process.env.DB_PASSWORD)
+  );
+}
+
+async function readLegacyAttendanceRows() {
+  if (!hasDbCredentials()) {
+    return { ok: false, reason: 'DB credentials are missing in environment variables.', rows: [] };
+  }
+
+  const pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT || 3306),
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 5
+  });
+
+  try {
+    const [tables] = await pool.query("SHOW TABLES LIKE 'attendance'");
+    if (!tables.length) {
+      return { ok: false, reason: 'Legacy attendance table was not found.', rows: [] };
+    }
+
+    const [rows] = await pool.query(
+      `SELECT id, service_date AS serviceDate, service_type AS serviceType, headcount, note, created_at AS createdAt
+       FROM attendance
+       ORDER BY service_date, service_type`
+    );
+
+    return { ok: true, reason: '', rows };
+  } finally {
+    await pool.end();
+  }
 }
 
 const membershipTypes = ['Prospect', 'Member', 'Voting Member'];
@@ -928,6 +971,10 @@ app.get('/metrics', async (req, res, next) => {
 
     const attendanceThisYear = yearRecords.length;
     const attendanceTotalHeadcount = yearRecords.reduce((sum, row) => sum + row.headcount, 0);
+    const legacyMessage = normalize(req.query.legacyMessage);
+    const legacyImported = normalize(req.query.legacyImported);
+    const legacyUpdated = normalize(req.query.legacyUpdated);
+    const legacySkipped = normalize(req.query.legacySkipped);
 
     res.render('metrics', {
       activeTab: 'metrics',
@@ -939,6 +986,10 @@ app.get('/metrics', async (req, res, next) => {
       averages: avgBuckets,
       attendanceThisYear,
       attendanceTotalHeadcount,
+      legacyMessage,
+      legacyImported,
+      legacyUpdated,
+      legacySkipped,
       totalPeople,
       birthdaysThisMonth,
       upcomingEvents: data.events.length,
@@ -1080,6 +1131,88 @@ app.post('/api/metrics/attendance/:id/delete', async (req, res, next) => {
       return data;
     });
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/metrics/import-legacy', async (req, res, next) => {
+  try {
+    const legacy = await readLegacyAttendanceRows();
+    if (!legacy.ok) {
+      const params = new URLSearchParams({
+        legacyMessage: legacy.reason,
+        legacyImported: '0',
+        legacyUpdated: '0',
+        legacySkipped: '0'
+      });
+      return res.redirect(`/metrics?${params.toString()}`);
+    }
+
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    await updateData((data) => {
+      data.attendanceRecords = data.attendanceRecords || [];
+      const keyMap = new Map(
+        data.attendanceRecords.map((entry) => {
+          const key = `${toIsoDate(entry.serviceDate)}|${normalizeServiceType(entry.serviceType)}`;
+          return [key, entry];
+        })
+      );
+
+      legacy.rows.forEach((row) => {
+        const serviceDate = toIsoDate(row.serviceDate);
+        const serviceType = normalizeServiceType(row.serviceType);
+        const headcount = Number.parseInt(row.headcount, 10);
+        const note = normalize(row.note);
+
+        if (!serviceDate || Number.isNaN(headcount) || headcount < 0) {
+          skipped += 1;
+          return;
+        }
+
+        const key = `${serviceDate}|${serviceType}`;
+        const existing = keyMap.get(key);
+
+        if (existing) {
+          const changed = existing.headcount !== headcount || normalize(existing.note) !== note;
+          if (changed) {
+            existing.headcount = headcount;
+            existing.note = note;
+            existing.updatedAt = new Date().toISOString();
+            updated += 1;
+          } else {
+            skipped += 1;
+          }
+          return;
+        }
+
+        const newRecord = {
+          id: row.id ? `legacy-att-${row.id}` : id(),
+          serviceDate,
+          serviceType,
+          headcount,
+          note,
+          createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        data.attendanceRecords.push(newRecord);
+        keyMap.set(key, newRecord);
+        imported += 1;
+      });
+
+      return data;
+    });
+
+    const params = new URLSearchParams({
+      legacyMessage: 'Legacy attendance import complete.',
+      legacyImported: String(imported),
+      legacyUpdated: String(updated),
+      legacySkipped: String(skipped)
+    });
+    return res.redirect(`/metrics?${params.toString()}`);
   } catch (err) {
     next(err);
   }

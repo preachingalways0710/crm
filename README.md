@@ -9,6 +9,7 @@ A focused, self-hosted church operations interface for:
 - CSV and Excel people import (XLS/XLSX export migration)
 - Membership type classification (Prospect, Member, Voting Member)
 - Integrated attendance metrics module (yearly chart, entry form, recent records)
+- One-click legacy attendance import from existing MySQL `attendance` table
 - Yearly calendar planning
 - Calendar birthday overlay toggle
 - Registration forms (starter level)

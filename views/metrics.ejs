@@ -1,5 +1,12 @@
 <%- include('partials-nav', { activeTab }) %>
 
+<% if (legacyMessage) { %>
+  <div class="alert alert-info" role="alert">
+    <strong><%= legacyMessage %></strong>
+    <div class="small mt-1">Imported: <%= legacyImported || '0' %> · Updated: <%= legacyUpdated || '0' %> · Skipped: <%= legacySkipped || '0' %></div>
+  </div>
+<% } %>
+
 <div class="row row-deck row-cards mb-3">
   <div class="col-sm-6 col-lg-3">
     <div class="card">
@@ -48,6 +55,9 @@
                 <option value="<%= value %>" <%= value === year ? 'selected' : '' %>><%= value %></option>
               <% }) %>
             </select>
+          </form>
+          <form method="post" action="/metrics/import-legacy" onsubmit="return confirm('Import attendance records from legacy table now?');">
+            <button class="btn btn-outline-secondary btn-sm" type="submit">Import Legacy Data</button>
           </form>
           <a class="btn btn-primary btn-sm" href="/metrics/entry">+ Add Record</a>
         </div>
