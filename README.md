@@ -19,7 +19,9 @@ A focused, self-hosted church operations interface for:
 - Node.js + Express
 - EJS server-rendered UI
 - Tabler UI kit (open source admin framework via CDN)
-- File-based JSON persistence (`data/data.json`)
+- Persistence:
+  - MySQL-backed JSON state when `DB_HOST/DB_NAME/DB_USER/DB_PASSWORD` env vars are set
+  - File fallback (`data/data.json`) when DB vars are not set
 - csv-parse + xlsx + multer (CSV/Excel import parser and upload)
 - FullCalendar (calendar UI)
 - Leaflet + Leaflet.draw (visitation map sections)
