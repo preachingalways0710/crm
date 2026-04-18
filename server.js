@@ -235,6 +235,39 @@ function normalizeServiceType(value) {
   return ['wed', 'sun_am', 'sun_pm'].includes(serviceType) ? serviceType : 'sun_am';
 }
 
+function parseTagsInput(value) {
+  const parts = normalize(value)
+    .split(/[,\n;]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const seen = new Set();
+  const tags = [];
+  parts.forEach((tag) => {
+    const key = tag.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      tags.push(tag);
+    }
+  });
+
+  return tags.slice(0, 20);
+}
+
+function normalizePersonTags(value) {
+  if (Array.isArray(value)) {
+    return parseTagsInput(value.join(','));
+  }
+  if (typeof value === 'string') {
+    return parseTagsInput(value);
+  }
+  return [];
+}
+
+function normalizeFollowupsFilter(value) {
+  return normalize(value) === 'open' ? 'open' : 'all';
+}
+
 function normalizeUrlWithScheme(value) {
   const raw = normalize(value);
   if (!raw) return '';
@@ -537,16 +570,121 @@ async function readPessoasAttendanceRows() {
 const membershipTypes = ['Prospect', 'Member', 'Voting Member'];
 const genderOptions = ['Male', 'Female', 'Unspecified'];
 const serviceTypes = ['wed', 'sun_am', 'sun_pm'];
+const followUpStages = [
+  { value: 'new_visitor', label: 'New Visitor' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'visited', label: 'Visited' },
+  { value: 'connected', label: 'Connected' },
+  { value: 'member', label: 'Member' }
+];
+const followUpStageValues = followUpStages.map((stage) => stage.value);
+const followUpStageLabels = followUpStages.reduce((acc, stage) => {
+  acc[stage.value] = stage.label;
+  return acc;
+}, {});
 const serviceTypeLabels = {
   wed: 'Wednesday',
   sun_am: 'Sunday AM',
   sun_pm: 'Sunday PM'
 };
 
+function normalizeFollowUpStage(value) {
+  const stage = normalize(value);
+  return followUpStageValues.includes(stage) ? stage : 'new_visitor';
+}
+
+function normalizeFollowUpStageFilter(value) {
+  const normalized = normalize(value);
+  if (!normalized || normalized === 'all') return 'all';
+  return normalizeFollowUpStage(normalized);
+}
+
+function normalizeMembershipTypeFilter(value) {
+  const membershipType = normalize(value);
+  return membershipTypes.includes(membershipType) ? membershipType : '';
+}
+
+function normalizeSmartPeopleFilter(input = {}) {
+  return {
+    id: normalize(input.id) || id(),
+    name: normalize(input.name),
+    q: normalize(input.q),
+    followups: normalizeFollowupsFilter(input.followups),
+    membershipType: normalizeMembershipTypeFilter(input.membershipType),
+    tag: normalize(input.tag),
+    createdAt: normalize(input.createdAt) || new Date().toISOString()
+  };
+}
+
+function buildPersonTimeline(person, followUps, visits) {
+  const timeline = [];
+
+  const createdAt = normalize(person.createdAt) || normalize(person.updatedAt);
+  if (createdAt) {
+    timeline.push({
+      id: `person-created-${person.id}`,
+      at: createdAt,
+      title: 'Profile created',
+      detail: 'Person record was added.',
+      kind: 'person'
+    });
+  }
+
+  if (normalize(person.updatedAt) && normalize(person.updatedAt) !== createdAt) {
+    timeline.push({
+      id: `person-updated-${person.id}`,
+      at: person.updatedAt,
+      title: 'Profile updated',
+      detail: 'Contact or profile details were updated.',
+      kind: 'person'
+    });
+  }
+
+  (followUps || []).forEach((item) => {
+    if (normalize(item.createdAt)) {
+      timeline.push({
+        id: `followup-created-${item.id}`,
+        at: item.createdAt,
+        title: `Follow-up added: ${item.title}`,
+        detail: `Stage: ${followUpStageLabels[normalizeFollowUpStage(item.stage)]}${item.dueDate ? ` · Due: ${item.dueDate}` : ''}`,
+        kind: 'followup'
+      });
+    }
+
+    if (normalize(item.completedAt)) {
+      timeline.push({
+        id: `followup-completed-${item.id}`,
+        at: item.completedAt,
+        title: `Follow-up completed: ${item.title}`,
+        detail: 'Marked complete.',
+        kind: 'followup'
+      });
+    }
+  });
+
+  (visits || []).forEach((visit) => {
+    const at = normalize(visit.createdAt) || normalize(visit.date);
+    if (!at) return;
+    timeline.push({
+      id: `visit-${visit.id}`,
+      at,
+      title: `Visit logged: ${visit.summary}`,
+      detail: visit.nextStep ? `Next step: ${visit.nextStep}` : 'No next step provided.',
+      kind: 'visit'
+    });
+  });
+
+  return timeline
+    .filter((item) => normalize(item.at))
+    .sort((a, b) => new Date(b.at) - new Date(a.at));
+}
+
 app.locals.formatDateDMY = formatDateDMY;
 app.locals.membershipTypes = membershipTypes;
 app.locals.genderOptions = genderOptions;
 app.locals.serviceTypeLabels = serviceTypeLabels;
+app.locals.followUpStages = followUpStages;
+app.locals.followUpStageLabels = followUpStageLabels;
 
 function isAuthEnabled() {
   return Boolean(getAuthPassword());
@@ -643,6 +781,7 @@ function mapImportRow(row) {
     city: csvField(row, ['city']),
     state: csvField(row, ['state']),
     zipCode: csvField(row, ['zip', 'zip_code', 'zip code']),
+    tags: parseTagsInput(csvField(row, ['tags', 'labels', 'label'])),
     membershipType,
     joinedAt,
     createdAt,
@@ -700,6 +839,7 @@ async function importPeopleRows(rows) {
         city: row.city || '',
         state: row.state || '',
         zipCode: row.zipCode || '',
+        tags: row.tags || [],
         membershipType: row.membershipType || '',
         joinedAt: row.joinedAt || '',
         createdAt: row.createdAt || '',
@@ -776,8 +916,26 @@ app.get('/', (req, res) => {
 app.get('/people', async (req, res, next) => {
   try {
     const data = await readData();
-    const q = normalize(req.query.q).toLowerCase();
-    const followups = normalize(req.query.followups) || 'all';
+    const savedPeopleFilters = ((data.settings || {}).peopleSavedFilters || []).map((entry) =>
+      normalizeSmartPeopleFilter(entry)
+    );
+    const selectedSmartFilterId = normalize(req.query.smartFilter);
+    const selectedSmartFilter = savedPeopleFilters.find((entry) => entry.id === selectedSmartFilterId) || null;
+
+    let q = normalize(req.query.q);
+    let followups = normalizeFollowupsFilter(req.query.followups);
+    let membershipTypeFilter = normalizeMembershipTypeFilter(req.query.membershipType);
+    let tagFilter = normalize(req.query.tag);
+
+    if (selectedSmartFilter) {
+      q = selectedSmartFilter.q;
+      followups = normalizeFollowupsFilter(selectedSmartFilter.followups);
+      membershipTypeFilter = normalizeMembershipTypeFilter(selectedSmartFilter.membershipType);
+      tagFilter = normalize(selectedSmartFilter.tag);
+    }
+
+    const qLower = q.toLowerCase();
+    const tagFilterLower = tagFilter.toLowerCase();
     const now = new Date();
 
     const openFollowUpsByPerson = data.followUps
@@ -789,10 +947,11 @@ app.get('/people', async (req, res, next) => {
 
     let people = sortByName(data.people).map((person) => ({
       ...enrichPerson(person),
+      tags: normalizePersonTags(person.tags),
       openFollowUps: openFollowUpsByPerson[person.id] || 0
     }));
 
-    if (q) {
+    if (qLower) {
       people = people.filter((person) =>
         [
           person.name,
@@ -800,17 +959,39 @@ app.get('/people', async (req, res, next) => {
           person.phone,
           person.sectionId,
           person.membershipType,
-          person.notes
+          person.notes,
+          (person.tags || []).join(' ')
         ]
           .join(' ')
           .toLowerCase()
-          .includes(q)
+          .includes(qLower)
       );
     }
 
     if (followups === 'open') {
       people = people.filter((person) => person.openFollowUps > 0);
     }
+
+    if (membershipTypeFilter) {
+      people = people.filter((person) => normalize(person.membershipType) === membershipTypeFilter);
+    }
+
+    if (tagFilterLower) {
+      people = people.filter((person) =>
+        (person.tags || []).some((tag) => normalize(tag).toLowerCase() === tagFilterLower)
+      );
+    }
+
+    const tagDisplayMap = new Map();
+    data.people.forEach((person) => {
+      normalizePersonTags(person.tags).forEach((tag) => {
+        const key = tag.toLowerCase();
+        if (!tagDisplayMap.has(key)) {
+          tagDisplayMap.set(key, tag);
+        }
+      });
+    });
+    const availableTags = Array.from(tagDisplayMap.values()).sort((a, b) => a.localeCompare(b));
 
     const upcomingBirthdays = sortByName(data.people)
       .map((person) => {
@@ -832,6 +1013,12 @@ app.get('/people', async (req, res, next) => {
       people,
       q,
       followups,
+      membershipTypeFilter,
+      tagFilter,
+      availableTags,
+      savedPeopleFilters,
+      selectedSmartFilterId: selectedSmartFilter?.id || '',
+      selectedSmartFilterName: selectedSmartFilter?.name || '',
       upcomingBirthdays
     });
   } catch (err) {
@@ -849,6 +1036,51 @@ app.get('/people/new', async (req, res, next) => {
   }
 });
 
+app.post('/people/filters', async (req, res, next) => {
+  try {
+    const filter = normalizeSmartPeopleFilter({
+      name: req.body.name,
+      q: req.body.q,
+      followups: req.body.followups,
+      membershipType: req.body.membershipType,
+      tag: req.body.tag
+    });
+
+    if (!filter.name) {
+      return res.redirect('/people');
+    }
+
+    await updateData((data) => {
+      data.settings = data.settings || {};
+      data.settings.peopleSavedFilters = ((data.settings.peopleSavedFilters || [])
+        .map((entry) => normalizeSmartPeopleFilter(entry))
+        .filter((entry) => entry.name))
+        .slice(0, 49);
+      data.settings.peopleSavedFilters.push(filter);
+      return data;
+    });
+
+    return res.redirect(`/people?smartFilter=${encodeURIComponent(filter.id)}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/people/filters/:filterId/delete', async (req, res, next) => {
+  try {
+    await updateData((data) => {
+      data.settings = data.settings || {};
+      data.settings.peopleSavedFilters = (data.settings.peopleSavedFilters || []).filter(
+        (entry) => normalize(entry.id) !== req.params.filterId
+      );
+      return data;
+    });
+    return res.redirect('/people');
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get('/people/:id', async (req, res, next) => {
   try {
     const data = await readData();
@@ -858,22 +1090,34 @@ app.get('/people/:id', async (req, res, next) => {
       return res.status(404).send('Person not found');
     }
 
-    const tab = req.query.tab || 'profile';
+    const tab = normalize(req.query.tab) || 'profile';
+    const allowedTabs = new Set(['profile', 'followups', 'visits', 'notes', 'timeline']);
+    const currentTab = allowedTabs.has(tab) ? tab : 'profile';
 
     const followUps = data.followUps
       .filter((entry) => entry.personId === person.id)
+      .map((entry) => ({
+        ...entry,
+        stage: normalizeFollowUpStage(entry.stage)
+      }))
       .sort((a, b) => new Date(a.dueDate || a.createdAt) - new Date(b.dueDate || b.createdAt));
 
     const visits = data.visits
       .filter((entry) => entry.personId === person.id)
       .sort((a, b) => new Date(b.date) - new Date(a.date));
 
+    const timeline = buildPersonTimeline(person, followUps, visits);
+
     res.render('people-profile', {
       activeTab: 'people',
-      person: enrichPerson(person),
-      tab,
+      person: {
+        ...enrichPerson(person),
+        tags: normalizePersonTags(person.tags)
+      },
+      tab: currentTab,
       followUps,
       visits,
+      timeline,
       followUpOpenCount: followUps.filter((entry) => entry.status !== 'completed').length
     });
   } catch (err) {
@@ -883,6 +1127,7 @@ app.get('/people/:id', async (req, res, next) => {
 
 app.post('/people', async (req, res, next) => {
   try {
+    const nowIso = new Date().toISOString();
     const person = {
       id: id(),
       name: req.body.name?.trim() || '',
@@ -904,7 +1149,9 @@ app.post('/people', async (req, res, next) => {
       city: req.body.city || '',
       state: req.body.state || '',
       zipCode: req.body.zipCode || '',
-      updatedAt: new Date().toISOString()
+      tags: parseTagsInput(req.body.tags),
+      createdAt: nowIso,
+      updatedAt: nowIso
     };
 
     if (!person.name) {
@@ -956,6 +1203,7 @@ app.post('/people/:id', async (req, res, next) => {
         write('city', (value) => value || '');
         write('state', (value) => value || '');
         write('zipCode', (value) => value || '');
+        write('tags', (value) => parseTagsInput(value));
         person.updatedAt = new Date().toISOString();
       }
 
@@ -991,6 +1239,7 @@ app.post('/people/:id/followups', async (req, res, next) => {
       return res.redirect(`/people/${req.params.id}?tab=followups`);
     }
 
+    const nowIso = new Date().toISOString();
     await updateData((data) => {
       data.followUps.push({
         id: id(),
@@ -999,7 +1248,10 @@ app.post('/people/:id/followups', async (req, res, next) => {
         dueDate: req.body.dueDate || '',
         notes: req.body.notes?.trim() || '',
         status: 'open',
-        createdAt: new Date().toISOString(),
+        stage: normalizeFollowUpStage(req.body.stage),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        stageUpdatedAt: nowIso,
         completedAt: ''
       });
 
@@ -1018,8 +1270,10 @@ app.post('/people/:id/followups/:followUpId/complete', async (req, res, next) =>
       const row = data.followUps.find((entry) => entry.id === req.params.followUpId && entry.personId === req.params.id);
 
       if (row) {
+        row.stage = normalizeFollowUpStage(row.stage);
         row.status = 'completed';
         row.completedAt = new Date().toISOString();
+        row.updatedAt = new Date().toISOString();
       }
 
       return data;
@@ -1037,14 +1291,34 @@ app.post('/people/:id/followups/:followUpId/reopen', async (req, res, next) => {
       const row = data.followUps.find((entry) => entry.id === req.params.followUpId && entry.personId === req.params.id);
 
       if (row) {
+        row.stage = normalizeFollowUpStage(row.stage);
         row.status = 'open';
         row.completedAt = '';
+        row.updatedAt = new Date().toISOString();
       }
 
       return data;
     });
 
     res.redirect(`/people/${req.params.id}?tab=followups`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/people/:id/followups/:followUpId/stage', async (req, res, next) => {
+  try {
+    await updateData((data) => {
+      const row = data.followUps.find((entry) => entry.id === req.params.followUpId && entry.personId === req.params.id);
+      if (row) {
+        row.stage = normalizeFollowUpStage(req.body.stage);
+        row.stageUpdatedAt = new Date().toISOString();
+        row.updatedAt = new Date().toISOString();
+      }
+      return data;
+    });
+
+    return res.redirect(`/people/${req.params.id}?tab=followups`);
   } catch (err) {
     next(err);
   }
@@ -1081,6 +1355,7 @@ app.get('/followups', async (req, res, next) => {
   try {
     const data = await readData();
     const status = normalize(req.query.status) || 'open';
+    const stage = normalizeFollowUpStageFilter(req.query.stage);
 
     const peopleById = data.people.reduce((acc, person) => {
       acc[person.id] = person;
@@ -1092,6 +1367,7 @@ app.get('/followups', async (req, res, next) => {
         const person = peopleById[item.personId];
         return {
           ...item,
+          stage: normalizeFollowUpStage(item.stage),
           personName: person?.name || 'Unknown person',
           personLink: person ? `/people/${person.id}?tab=followups` : '/people'
         };
@@ -1108,10 +1384,15 @@ app.get('/followups', async (req, res, next) => {
       queue = queue.filter((item) => item.status === 'completed');
     }
 
+    if (stage !== 'all') {
+      queue = queue.filter((item) => item.stage === stage);
+    }
+
     res.render('followups', {
       activeTab: 'followups',
       queue,
-      status
+      status,
+      stage
     });
   } catch (err) {
     next(err);
@@ -1120,16 +1401,19 @@ app.get('/followups', async (req, res, next) => {
 
 app.post('/followups/:followUpId/complete', async (req, res, next) => {
   try {
+    const returnTo = normalize(req.body.returnTo) || '/followups?status=open';
     await updateData((data) => {
       const row = data.followUps.find((entry) => entry.id === req.params.followUpId);
       if (row) {
+        row.stage = normalizeFollowUpStage(row.stage);
         row.status = 'completed';
         row.completedAt = new Date().toISOString();
+        row.updatedAt = new Date().toISOString();
       }
       return data;
     });
 
-    res.redirect('/followups?status=open');
+    res.redirect(returnTo);
   } catch (err) {
     next(err);
   }
@@ -1137,16 +1421,38 @@ app.post('/followups/:followUpId/complete', async (req, res, next) => {
 
 app.post('/followups/:followUpId/reopen', async (req, res, next) => {
   try {
+    const returnTo = normalize(req.body.returnTo) || '/followups?status=completed';
     await updateData((data) => {
       const row = data.followUps.find((entry) => entry.id === req.params.followUpId);
       if (row) {
+        row.stage = normalizeFollowUpStage(row.stage);
         row.status = 'open';
         row.completedAt = '';
+        row.updatedAt = new Date().toISOString();
       }
       return data;
     });
 
-    res.redirect('/followups?status=completed');
+    res.redirect(returnTo);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/followups/:followUpId/stage', async (req, res, next) => {
+  try {
+    const returnTo = normalize(req.body.returnTo) || '/followups?status=open';
+    await updateData((data) => {
+      const row = data.followUps.find((entry) => entry.id === req.params.followUpId);
+      if (row) {
+        row.stage = normalizeFollowUpStage(req.body.stage);
+        row.stageUpdatedAt = new Date().toISOString();
+        row.updatedAt = new Date().toISOString();
+      }
+      return data;
+    });
+
+    res.redirect(returnTo);
   } catch (err) {
     next(err);
   }

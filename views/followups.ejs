@@ -17,6 +17,15 @@
           <option value="all" <%= status === 'all' ? 'selected' : '' %>>All</option>
         </select>
       </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label">Pipeline Stage</label>
+        <select class="form-select" name="stage">
+          <option value="all" <%= stage === 'all' ? 'selected' : '' %>>All stages</option>
+          <% followUpStages.forEach((stageOption) => { %>
+            <option value="<%= stageOption.value %>" <%= stage === stageOption.value ? 'selected' : '' %>><%= stageOption.label %></option>
+          <% }) %>
+        </select>
+      </div>
       <div class="col-12 col-md-2 d-flex align-items-end">
         <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
       </div>
@@ -29,6 +38,7 @@
         <tr>
           <th>Person</th>
           <th>Task</th>
+          <th>Stage</th>
           <th>Due Date</th>
           <th>Status</th>
           <th>Notes</th>
@@ -37,23 +47,35 @@
       </thead>
       <tbody>
         <% if (!queue.length) { %>
-          <tr><td colspan="6" class="text-secondary">No follow-ups found for this filter.</td></tr>
+          <tr><td colspan="7" class="text-secondary">No follow-ups found for this filter.</td></tr>
         <% } %>
 
         <% queue.forEach((item) => { %>
           <tr>
             <td><a href="<%= item.personLink %>"><%= item.personName %></a></td>
             <td><%= item.title %></td>
+            <td>
+              <form method="post" action="/followups/<%= item.id %>/stage" class="d-flex gap-2">
+                <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>" />
+                <select class="form-select form-select-sm" name="stage" onchange="this.form.submit()">
+                  <% followUpStages.forEach((stageOption) => { %>
+                    <option value="<%= stageOption.value %>" <%= item.stage === stageOption.value ? 'selected' : '' %>><%= stageOption.label %></option>
+                  <% }) %>
+                </select>
+              </form>
+            </td>
             <td><%= item.dueDate || '-' %></td>
             <td><span class="badge <%= item.status === 'completed' ? 'bg-green-lt' : 'bg-orange-lt' %>"><%= item.status %></span></td>
             <td><%= item.notes || '-' %></td>
             <td>
               <% if (item.status === 'completed') { %>
                 <form method="post" action="/followups/<%= item.id %>/reopen">
+                  <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>" />
                   <button class="btn btn-outline-secondary btn-sm" type="submit">Reopen</button>
                 </form>
               <% } else { %>
                 <form method="post" action="/followups/<%= item.id %>/complete">
+                  <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>" />
                   <button class="btn btn-primary btn-sm" type="submit">Complete</button>
                 </form>
               <% } %>

@@ -13,12 +13,20 @@
         <p class="text-secondary mb-2"><%= person.email || 'No email' %></p>
         <span class="badge bg-green-lt">Active</span>
         <span class="badge bg-azure-lt"><%= person.membershipType || 'Prospect' %></span>
+        <% if ((person.tags || []).length) { %>
+          <div class="mt-2 d-flex flex-wrap justify-content-center gap-1">
+            <% person.tags.forEach((tag) => { %>
+              <span class="badge bg-secondary-lt"><%= tag %></span>
+            <% }) %>
+          </div>
+        <% } %>
       </div>
 
       <div class="list-group list-group-flush">
         <a class="list-group-item list-group-item-action" href="/people/<%= person.id %>?tab=profile"><i class="bi bi-person me-2"></i>Profile</a>
         <a class="list-group-item list-group-item-action" href="/people/<%= person.id %>?tab=followups"><i class="bi bi-list-check me-2"></i>Follow-ups</a>
         <a class="list-group-item list-group-item-action" href="/people/<%= person.id %>?tab=visits"><i class="bi bi-calendar-check me-2"></i>Visit Log</a>
+        <a class="list-group-item list-group-item-action" href="/people/<%= person.id %>?tab=timeline"><i class="bi bi-clock-history me-2"></i>Timeline</a>
         <a class="list-group-item list-group-item-action" href="/people/<%= person.id %>?tab=notes"><i class="bi bi-journal-text me-2"></i>Notes</a>
       </div>
 
@@ -39,6 +47,7 @@
           <li class="nav-item"><a class="nav-link <%= tab === 'profile' ? 'active' : '' %>" href="/people/<%= person.id %>?tab=profile">Profile</a></li>
           <li class="nav-item"><a class="nav-link <%= tab === 'followups' ? 'active' : '' %>" href="/people/<%= person.id %>?tab=followups">Follow-ups</a></li>
           <li class="nav-item"><a class="nav-link <%= tab === 'visits' ? 'active' : '' %>" href="/people/<%= person.id %>?tab=visits">Visits</a></li>
+          <li class="nav-item"><a class="nav-link <%= tab === 'timeline' ? 'active' : '' %>" href="/people/<%= person.id %>?tab=timeline">Timeline</a></li>
           <li class="nav-item"><a class="nav-link <%= tab === 'notes' ? 'active' : '' %>" href="/people/<%= person.id %>?tab=notes">Notes</a></li>
         </ul>
       </div>
@@ -123,6 +132,7 @@
                   </select>
                 </div>
                 <div class="col-6"><label class="form-label">Section ID</label><input class="form-control" name="sectionId" value="<%= person.sectionId || '' %>" /></div>
+                <div class="col-12"><label class="form-label">Tags (comma separated)</label><input class="form-control" name="tags" value="<%= (person.tags || []).join(', ') %>" placeholder="visitor, youth, choir" /></div>
                 <div class="col-6"><label class="form-label">Occupation</label><input class="form-control" name="occupation" value="<%= person.occupation || '' %>" /></div>
                 <div class="col-6"><label class="form-label">Language</label><input class="form-control" name="language" value="<%= person.language || '' %>" /></div>
                 <div class="col-6"><label class="form-label">Marital Status</label><input class="form-control" name="maritalStatus" value="<%= person.maritalStatus || '' %>" /></div>
@@ -153,9 +163,16 @@
         <div class="card-header"><h3 class="card-title">Add Follow-up</h3></div>
         <div class="card-body">
           <form method="post" action="/people/<%= person.id %>/followups" class="row g-2">
-            <div class="col-12 col-md-5"><label class="form-label">Task</label><input class="form-control" name="title" required placeholder="Call this week" /></div>
-            <div class="col-12 col-md-3"><label class="form-label">Due Date</label><input class="form-control" name="dueDate" type="date" /></div>
-            <div class="col-12 col-md-4"><label class="form-label">Notes</label><input class="form-control" name="notes" placeholder="Prayer request follow-up" /></div>
+            <div class="col-12 col-md-4"><label class="form-label">Task</label><input class="form-control" name="title" required placeholder="Call this week" /></div>
+            <div class="col-12 col-md-3"><label class="form-label">Stage</label>
+              <select class="form-select" name="stage">
+                <% followUpStages.forEach((stageOption) => { %>
+                  <option value="<%= stageOption.value %>" <%= stageOption.value === 'new_visitor' ? 'selected' : '' %>><%= stageOption.label %></option>
+                <% }) %>
+              </select>
+            </div>
+            <div class="col-12 col-md-2"><label class="form-label">Due Date</label><input class="form-control" name="dueDate" type="date" /></div>
+            <div class="col-12 col-md-3"><label class="form-label">Notes</label><input class="form-control" name="notes" placeholder="Prayer request follow-up" /></div>
             <div class="col-12"><button class="btn btn-primary" type="submit">Add Follow-up</button></div>
           </form>
         </div>
@@ -165,14 +182,23 @@
         <div class="card-header"><h3 class="card-title">Follow-up Queue</h3></div>
         <div class="table-responsive">
           <table class="table table-vcenter">
-            <thead><tr><th>Task</th><th>Due</th><th>Status</th><th>Notes</th><th class="w-1"></th></tr></thead>
+            <thead><tr><th>Task</th><th>Stage</th><th>Due</th><th>Status</th><th>Notes</th><th class="w-1"></th></tr></thead>
             <tbody>
               <% if (!followUps.length) { %>
-                <tr><td colspan="5" class="text-secondary">No follow-ups yet.</td></tr>
+                <tr><td colspan="6" class="text-secondary">No follow-ups yet.</td></tr>
               <% } %>
               <% followUps.forEach((item) => { %>
                 <tr>
                   <td><%= item.title %></td>
+                  <td>
+                    <form method="post" action="/people/<%= person.id %>/followups/<%= item.id %>/stage" class="d-flex gap-2">
+                      <select class="form-select form-select-sm" name="stage" onchange="this.form.submit()">
+                        <% followUpStages.forEach((stageOption) => { %>
+                          <option value="<%= stageOption.value %>" <%= item.stage === stageOption.value ? 'selected' : '' %>><%= stageOption.label %></option>
+                        <% }) %>
+                      </select>
+                    </form>
+                  </td>
                   <td><%= item.dueDate || '-' %></td>
                   <td>
                     <span class="badge <%= item.status === 'completed' ? 'bg-green-lt' : 'bg-orange-lt' %>"><%= item.status %></span>
@@ -219,6 +245,26 @@
                 <span class="text-secondary"><%= visit.date %></span>
               </div>
               <p class="mb-0 text-secondary">Next step: <%= visit.nextStep || '-' %></p>
+            </div>
+          <% }) %>
+        </div>
+      </div>
+    <% } %>
+
+    <% if (tab === 'timeline') { %>
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Activity Timeline</h3></div>
+        <div class="list-group list-group-flush">
+          <% if (!timeline.length) { %>
+            <div class="list-group-item text-secondary">No timeline activity yet.</div>
+          <% } %>
+          <% timeline.forEach((item) => { %>
+            <div class="list-group-item">
+              <div class="d-flex justify-content-between align-items-center">
+                <strong><%= item.title %></strong>
+                <span class="text-secondary small"><%= new Date(item.at).toLocaleString() %></span>
+              </div>
+              <div class="text-secondary"><%= item.detail %></div>
             </div>
           <% }) %>
         </div>
