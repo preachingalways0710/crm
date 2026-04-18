@@ -1,12 +1,12 @@
 <%- include('partials-nav', { activeTab }) %>
 
 <div class="mb-3">
-  <a href="/metrics" class="btn btn-ghost-secondary btn-sm"><i class="bi bi-arrow-left"></i> Back to Metrics</a>
+  <a href="/metrics?year=<%= returnYear %>" class="btn btn-ghost-secondary btn-sm"><i class="bi bi-arrow-left"></i> Back to Metrics</a>
 </div>
 
 <div class="card" style="max-width: 720px;">
   <div class="card-header">
-    <h3 class="card-title"><%= record ? 'Edit Attendance Record' : 'Add Attendance Record' %></h3>
+    <h3 class="card-title"><%= record ? 'Edit Attendance Data' : 'Add Attendance Data' %></h3>
   </div>
   <div class="card-body">
     <% if (error) { %>
@@ -14,6 +14,7 @@
     <% } %>
 
     <form method="post" action="<%= record ? `/metrics/entry/${record.id}/update` : '/metrics/entry' %>" class="row g-2">
+      <input type="hidden" name="return_year" value="<%= returnYear %>" />
       <div class="col-12 col-md-4">
         <label class="form-label">Date</label>
         <input class="form-control" type="date" name="service_date" value="<%= date %>" required />
@@ -39,8 +40,8 @@
       </div>
 
       <div class="col-12 d-flex gap-2 mt-2">
-        <button class="btn btn-primary" type="submit"><%= record ? 'Save Changes' : 'Save Record' %></button>
-        <a class="btn btn-outline-secondary" href="/metrics">Cancel</a>
+        <button class="btn btn-primary" type="submit"><%= record ? 'Save Changes' : 'Add Data' %></button>
+        <a class="btn btn-outline-secondary" href="/metrics?year=<%= returnYear %>">Cancel</a>
       </div>
     </form>
   </div>

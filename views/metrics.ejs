@@ -1,9 +1,8 @@
 <%- include('partials-nav', { activeTab }) %>
 
-<% if (legacyMessage) { %>
-  <div class="alert alert-info" role="alert">
-    <strong><%= legacyMessage %></strong>
-    <div class="small mt-1">Imported: <%= legacyImported || '0' %> · Updated: <%= legacyUpdated || '0' %> · Skipped: <%= legacySkipped || '0' %></div>
+<% if (attendanceMessage) { %>
+  <div class="alert alert-<%= attendanceType %>" role="alert">
+    <strong><%= attendanceMessage %></strong>
   </div>
 <% } %>
 
@@ -56,10 +55,7 @@
               <% }) %>
             </select>
           </form>
-          <form method="post" action="/metrics/import-legacy" onsubmit="return confirm('Import attendance records from your legacy metrics app now?');">
-            <button class="btn btn-outline-secondary btn-sm" type="submit">Import Legacy Data</button>
-          </form>
-          <a class="btn btn-primary btn-sm" href="/metrics/entry">+ Add Record</a>
+          <a class="btn btn-primary btn-sm" href="/metrics/entry?year=<%= year %>">+ Add Data</a>
         </div>
       </div>
       <div class="card-body">
@@ -94,7 +90,7 @@
 
   <div class="col-12 col-lg-4">
     <div class="card">
-      <div class="card-header"><h3 class="card-title">Records</h3></div>
+      <div class="card-header"><h3 class="card-title">Records (<%= year %>)</h3></div>
       <div class="table-responsive">
         <table class="table table-vcenter">
           <thead>
@@ -106,10 +102,10 @@
             </tr>
           </thead>
           <tbody>
-            <% if (!recent.length) { %>
+            <% if (!recordsForYear.length) { %>
               <tr><td colspan="4" class="text-secondary">No records yet.</td></tr>
             <% } %>
-            <% recent.forEach((row) => { %>
+            <% recordsForYear.forEach((row) => { %>
               <tr>
                 <td><%= row.serviceDate %></td>
                 <td><span class="badge bg-azure-lt"><%= serviceTypeLabels[row.serviceType] %></span></td>

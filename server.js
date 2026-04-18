@@ -4,7 +4,6 @@ const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
 const XLSX = require('xlsx');
-const cheerio = require('cheerio');
 const { parse } = require('csv-parse/sync');
 const { readData, updateData } = require('./lib/dataStore');
 
@@ -232,359 +231,6 @@ function diffDays(dateA, dateB) {
 function normalizeServiceType(value) {
   const serviceType = normalize(value);
   return ['wed', 'sun_am', 'sun_pm'].includes(serviceType) ? serviceType : 'sun_am';
-}
-
-function getLegacyAppUrl() {
-  return normalize(process.env.METRICS_APP_URL) || normalize(process.env.ATTENDANCE_APP_URL);
-}
-
-function getLegacyAppPassword() {
-  const candidates = [
-    process.env.LEGACY_APP_PASSWORD,
-    process.env.LEGACY_ADMIN_PASSWORD,
-    process.env.ATTENDANCE_APP_PASSWORD,
-    process.env.ADMIN_PASSWORD,
-    process.env.CRM_ADMIN_PASSWORD,
-    process.env.APP_PASSWORD,
-    process.env.PASSWORD
-  ];
-  const first = candidates.find((value) => normalize(value).length > 0);
-  return normalize(first);
-}
-
-function getSetCookieHeaders(headers) {
-  if (!headers) return [];
-
-  if (typeof headers.getSetCookie === 'function') {
-    return headers.getSetCookie();
-  }
-
-  const headerValue = headers.get('set-cookie');
-  if (!headerValue) return [];
-  return [headerValue];
-}
-
-function parseCookiePairs(rawSetCookie) {
-  const pairs = [];
-  const value = normalize(rawSetCookie);
-  if (!value) return pairs;
-
-  const directPair = value.split(';')[0];
-  if (directPair.includes('=')) {
-    pairs.push(directPair.trim());
-  }
-
-  const pattern = /(?:^|,\s*)([^=,\s;]+)=([^;,\r\n]*)/g;
-  let match;
-  while ((match = pattern.exec(value)) !== null) {
-    const cookieName = normalize(match[1]);
-    const cookieValue = normalize(match[2]);
-    if (!cookieName) continue;
-    const pair = `${cookieName}=${cookieValue}`;
-    if (!pairs.includes(pair)) {
-      pairs.push(pair);
-    }
-  }
-
-  return pairs;
-}
-
-function mergeCookieHeader(existingHeader, setCookieHeaders) {
-  const cookieMap = new Map();
-
-  normalize(existingHeader)
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .forEach((pair) => {
-      const separatorIndex = pair.indexOf('=');
-      if (separatorIndex <= 0) return;
-      const key = pair.slice(0, separatorIndex).trim();
-      const value = pair.slice(separatorIndex + 1).trim();
-      if (key) cookieMap.set(key, value);
-    });
-
-  (setCookieHeaders || []).forEach((setCookie) => {
-    parseCookiePairs(setCookie).forEach((pair) => {
-      const separatorIndex = pair.indexOf('=');
-      if (separatorIndex <= 0) return;
-      const key = pair.slice(0, separatorIndex).trim();
-      const value = pair.slice(separatorIndex + 1).trim();
-      if (key) cookieMap.set(key, value);
-    });
-  });
-
-  return Array.from(cookieMap.entries())
-    .map(([key, value]) => `${key}=${value}`)
-    .join('; ');
-}
-
-async function legacyFetch(url, options = {}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function fetchLegacyHtml(url, cookieHeader = '', redirectsLeft = 5) {
-  const headers = {
-    Accept: 'text/html,application/xhtml+xml',
-    ...(cookieHeader ? { Cookie: cookieHeader } : {})
-  };
-
-  const response = await legacyFetch(url, {
-    method: 'GET',
-    headers,
-    redirect: 'manual'
-  });
-
-  let updatedCookieHeader = mergeCookieHeader(cookieHeader, getSetCookieHeaders(response.headers));
-  const location = response.headers.get('location');
-  const isRedirect = response.status >= 300 && response.status < 400 && location;
-
-  if (isRedirect && redirectsLeft > 0) {
-    const nextUrl = new URL(location, url).toString();
-    return fetchLegacyHtml(nextUrl, updatedCookieHeader, redirectsLeft - 1);
-  }
-
-  const html = await response.text();
-  return {
-    html,
-    status: response.status,
-    cookieHeader: updatedCookieHeader
-  };
-}
-
-function parseLegacyServiceType(value) {
-  const raw = normalize(value).toLowerCase();
-  if (!raw) return '';
-
-  if (['wed', 'wednesday'].includes(raw)) return 'wed';
-  if (['sun_am', 'sun am', 'sunday am', 'sunday_am'].includes(raw)) return 'sun_am';
-  if (['sun_pm', 'sun pm', 'sunday pm', 'sunday_pm'].includes(raw)) return 'sun_pm';
-
-  if (raw.includes('wed')) return 'wed';
-  if (raw.includes('sun') && raw.includes('pm')) return 'sun_pm';
-  if (raw.includes('sun') && raw.includes('am')) return 'sun_am';
-
-  return '';
-}
-
-function addLegacyRow(rowsMap, row) {
-  const serviceDate = toIsoDate(row.serviceDate);
-  const serviceType = parseLegacyServiceType(row.serviceType);
-  const headcount = Number.parseInt(row.headcount, 10);
-  const note = normalize(row.note);
-
-  if (!serviceDate || !serviceType || Number.isNaN(headcount) || headcount < 0) {
-    return;
-  }
-
-  const key = `${serviceDate}|${serviceType}`;
-  const existing = rowsMap.get(key);
-  if (existing) {
-    existing.headcount = headcount;
-    if (note) {
-      existing.note = note;
-    }
-    return;
-  }
-
-  rowsMap.set(key, {
-    serviceDate,
-    serviceType,
-    headcount,
-    note
-  });
-}
-
-function parseLegacyAttendancePage(html) {
-  const $ = cheerio.load(html || '');
-  const rowsMap = new Map();
-  const years = $('#year option')
-    .map((index, option) => {
-      const raw = normalize($(option).attr('value') || $(option).text());
-      return Number.parseInt(raw, 10);
-    })
-    .get()
-    .filter((value) => Number.isInteger(value));
-
-  const chartScript = $('script')
-    .map((index, script) => $(script).html() || '')
-    .get()
-    .find((content) => content.includes('const chartData ='));
-
-  if (chartScript) {
-    const chartMatch = chartScript.match(/const\s+chartData\s*=\s*(\{[\s\S]*?\})\s*;/);
-    if (chartMatch) {
-      try {
-        const parsed = JSON.parse(chartMatch[1]);
-        ['wed', 'sun_am', 'sun_pm'].forEach((serviceType) => {
-          const points = Array.isArray(parsed[serviceType]) ? parsed[serviceType] : [];
-          points.forEach((point) => {
-            addLegacyRow(rowsMap, {
-              serviceDate: point.x,
-              serviceType,
-              headcount: point.y,
-              note: ''
-            });
-          });
-        });
-      } catch (error) {
-        // Ignore chart parse errors and continue with table parsing.
-      }
-    }
-  }
-
-  $('table tbody tr').each((index, row) => {
-    const cells = $(row).find('td');
-    if (cells.length < 3) return;
-
-    const badgeClass = normalize($(cells[1]).find('.badge').attr('class') || '');
-    const badgeTypeMatch = badgeClass.match(/badge-(wed|sun_am|sun_pm)/);
-    const fallbackType = normalize($(cells[1]).text());
-    const serviceType = badgeTypeMatch ? badgeTypeMatch[1] : parseLegacyServiceType(fallbackType);
-
-    addLegacyRow(rowsMap, {
-      serviceDate: normalize($(cells[0]).text()),
-      serviceType,
-      headcount: normalize($(cells[2]).text()).replace(/[^\d-]/g, ''),
-      note: cells.length > 3 ? normalize($(cells[3]).text()) : ''
-    });
-  });
-
-  const hasLoginForm = $('form[action="/login"], form[action*="login"]').length > 0;
-  const hasPasswordError = /incorrect password/i.test($.text());
-  const requiresLogin = hasLoginForm || hasPasswordError;
-
-  return {
-    rows: Array.from(rowsMap.values()),
-    years: Array.from(new Set(years)),
-    requiresLogin,
-    hasPasswordError
-  };
-}
-
-function mergeLegacyRows(targetMap, rows) {
-  (rows || []).forEach((row) => addLegacyRow(targetMap, row));
-}
-
-async function readLegacyAttendanceRowsByScrape() {
-  const legacyUrl = getLegacyAppUrl();
-  if (!legacyUrl) {
-    return {
-      ok: false,
-      reason: 'Set METRICS_APP_URL (or ATTENDANCE_APP_URL) before importing legacy data.',
-      rows: []
-    };
-  }
-
-  let rootUrl;
-  let loginUrl;
-  try {
-    rootUrl = new URL('/', legacyUrl).toString();
-    loginUrl = new URL('/login', legacyUrl).toString();
-  } catch (error) {
-    return { ok: false, reason: 'Legacy metrics URL is invalid.', rows: [] };
-  }
-
-  try {
-    let cookieHeader = '';
-    let dashboard = await fetchLegacyHtml(rootUrl, cookieHeader);
-    cookieHeader = dashboard.cookieHeader;
-
-    let parsed = parseLegacyAttendancePage(dashboard.html);
-    if (!parsed.rows.length || parsed.requiresLogin) {
-      const legacyPassword = getLegacyAppPassword();
-      if (!legacyPassword) {
-        return {
-          ok: false,
-          reason: 'Legacy app needs login. Set LEGACY_APP_PASSWORD (or reuse ADMIN_PASSWORD) and try again.',
-          rows: []
-        };
-      }
-
-      const loginResponse = await legacyFetch(loginUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Accept: 'text/html,application/xhtml+xml',
-          ...(cookieHeader ? { Cookie: cookieHeader } : {})
-        },
-        body: new URLSearchParams({ password: legacyPassword }).toString(),
-        redirect: 'manual'
-      });
-
-      cookieHeader = mergeCookieHeader(cookieHeader, getSetCookieHeaders(loginResponse.headers));
-      const redirectTo = loginResponse.headers.get('location');
-
-      if (redirectTo) {
-        const afterLoginUrl = new URL(redirectTo, loginUrl).toString();
-        dashboard = await fetchLegacyHtml(afterLoginUrl, cookieHeader);
-      } else {
-        const postLoginHtml = await loginResponse.text();
-        dashboard = {
-          html: postLoginHtml,
-          status: loginResponse.status,
-          cookieHeader
-        };
-      }
-
-      cookieHeader = dashboard.cookieHeader;
-      parsed = parseLegacyAttendancePage(dashboard.html);
-      if (parsed.hasPasswordError || (parsed.requiresLogin && !parsed.rows.length)) {
-        return {
-          ok: false,
-          reason: 'Legacy login failed. Check LEGACY_APP_PASSWORD (or ADMIN_PASSWORD) value.',
-          rows: []
-        };
-      }
-    }
-
-    const mergedRows = new Map();
-    mergeLegacyRows(mergedRows, parsed.rows);
-
-    for (const year of parsed.years) {
-      const yearUrl = new URL(rootUrl);
-      yearUrl.searchParams.set('year', String(year));
-
-      const yearPage = await fetchLegacyHtml(yearUrl.toString(), cookieHeader);
-      cookieHeader = yearPage.cookieHeader;
-
-      const yearParsed = parseLegacyAttendancePage(yearPage.html);
-      if (yearParsed.requiresLogin && !yearParsed.rows.length) {
-        continue;
-      }
-      mergeLegacyRows(mergedRows, yearParsed.rows);
-    }
-
-    const rows = Array.from(mergedRows.values()).sort((a, b) => {
-      if (a.serviceDate === b.serviceDate) {
-        return a.serviceType.localeCompare(b.serviceType);
-      }
-      return a.serviceDate.localeCompare(b.serviceDate);
-    });
-
-    if (!rows.length) {
-      return {
-        ok: false,
-        reason: 'No attendance rows were found on the legacy metrics pages.',
-        rows: []
-      };
-    }
-
-    return { ok: true, reason: '', rows };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: `Could not scrape legacy app: ${error.message}`,
-      rows: []
-    };
-  }
 }
 
 const membershipTypes = ['Prospect', 'Member', 'Voting Member'];
@@ -1249,15 +895,6 @@ app.get('/metrics', async (req, res, next) => {
       years.unshift(year);
     }
 
-    const recent = [...normalizedAttendance]
-      .sort((a, b) => {
-        if (a.serviceDate === b.serviceDate) {
-          return a.serviceType.localeCompare(b.serviceType);
-        }
-        return b.serviceDate.localeCompare(a.serviceDate);
-      })
-      .slice(0, 15);
-
     const avgBuckets = serviceTypes.reduce((acc, type) => {
       const rows = yearRecords.filter((record) => record.serviceType === type);
       const total = rows.reduce((sum, row) => sum + row.headcount, 0);
@@ -1282,10 +919,17 @@ app.get('/metrics', async (req, res, next) => {
 
     const attendanceThisYear = yearRecords.length;
     const attendanceTotalHeadcount = yearRecords.reduce((sum, row) => sum + row.headcount, 0);
-    const legacyMessage = normalize(req.query.legacyMessage);
-    const legacyImported = normalize(req.query.legacyImported);
-    const legacyUpdated = normalize(req.query.legacyUpdated);
-    const legacySkipped = normalize(req.query.legacySkipped);
+    const recordsForYear = [...yearRecords].sort((a, b) => {
+      if (a.serviceDate === b.serviceDate) {
+        return a.serviceType.localeCompare(b.serviceType);
+      }
+      return b.serviceDate.localeCompare(a.serviceDate);
+    });
+    const attendanceMessage = normalize(req.query.attendanceMessage);
+    const attendanceTypeRaw = normalize(req.query.attendanceType);
+    const attendanceType = ['success', 'info', 'warning', 'danger'].includes(attendanceTypeRaw)
+      ? attendanceTypeRaw
+      : 'info';
 
     res.render('metrics', {
       activeTab: 'metrics',
@@ -1293,14 +937,12 @@ app.get('/metrics', async (req, res, next) => {
       year,
       years,
       chartData,
-      recent,
+      recordsForYear,
       averages: avgBuckets,
       attendanceThisYear,
       attendanceTotalHeadcount,
-      legacyMessage,
-      legacyImported,
-      legacyUpdated,
-      legacySkipped,
+      attendanceMessage,
+      attendanceType,
       totalPeople,
       birthdaysThisMonth,
       upcomingEvents: data.events.length,
@@ -1316,6 +958,8 @@ app.get('/metrics/entry', async (req, res, next) => {
   try {
     const today = new Date().toISOString().slice(0, 10);
     const dayOfWeek = new Date().getDay();
+    const requestedYear = Number.parseInt(req.query.year, 10);
+    const returnYear = Number.isNaN(requestedYear) ? new Date().getFullYear() : requestedYear;
 
     let suggestedType = 'sun_am';
     if (dayOfWeek === 3) suggestedType = 'wed';
@@ -1326,6 +970,7 @@ app.get('/metrics/entry', async (req, res, next) => {
       record: null,
       date: toIsoDate(req.query.date || today) || today,
       type: normalizeServiceType(req.query.type || suggestedType),
+      returnYear,
       error: ''
     });
   } catch (err) {
@@ -1340,12 +985,15 @@ app.get('/metrics/entry/:id/edit', async (req, res, next) => {
     if (!record) {
       return res.redirect('/metrics');
     }
+    const requestedYear = Number.parseInt(req.query.year, 10);
+    const returnYear = Number.isNaN(requestedYear) ? new Date(record.serviceDate).getFullYear() : requestedYear;
 
     res.render('metrics-entry', {
       activeTab: 'metrics',
       record,
       date: toIsoDate(record.serviceDate),
       type: normalizeServiceType(record.serviceType),
+      returnYear,
       error: ''
     });
   } catch (err) {
@@ -1366,16 +1014,19 @@ app.post('/metrics/entry', async (req, res, next) => {
         record: null,
         date: serviceDate || normalize(req.body.service_date),
         type: serviceType,
+        returnYear: Number.parseInt(req.body.return_year, 10) || new Date().getFullYear(),
         error: 'Date, service type, and a non-negative headcount are required.'
       });
     }
 
+    let action = 'created';
     await updateData((data) => {
       const existing = (data.attendanceRecords || []).find(
         (row) => toIsoDate(row.serviceDate) === serviceDate && normalizeServiceType(row.serviceType) === serviceType
       );
 
       if (existing) {
+        action = 'updated';
         existing.headcount = headcount;
         existing.note = note;
         existing.updatedAt = new Date().toISOString();
@@ -1394,7 +1045,15 @@ app.post('/metrics/entry', async (req, res, next) => {
       return data;
     });
 
-    return res.redirect(`/metrics?year=${new Date(serviceDate).getFullYear()}`);
+    const params = new URLSearchParams({
+      year: String(Number.parseInt(req.body.return_year, 10) || new Date(serviceDate).getFullYear()),
+      attendanceType: 'success',
+      attendanceMessage:
+        action === 'created'
+          ? 'Attendance record added.'
+          : 'Attendance record updated for that same date/service.'
+    });
+    return res.redirect(`/metrics?${params.toString()}`);
   } catch (err) {
     next(err);
   }
@@ -1413,13 +1072,16 @@ app.post('/metrics/entry/:id/update', async (req, res, next) => {
         record: { id: req.params.id, serviceDate, serviceType, headcount: req.body.headcount, note },
         date: serviceDate || normalize(req.body.service_date),
         type: serviceType,
+        returnYear: Number.parseInt(req.body.return_year, 10) || new Date().getFullYear(),
         error: 'Date, service type, and a non-negative headcount are required.'
       });
     }
 
+    let found = false;
     await updateData((data) => {
       const row = (data.attendanceRecords || []).find((entry) => entry.id === req.params.id);
       if (row) {
+        found = true;
         row.serviceDate = serviceDate;
         row.serviceType = serviceType;
         row.headcount = headcount;
@@ -1429,7 +1091,12 @@ app.post('/metrics/entry/:id/update', async (req, res, next) => {
       return data;
     });
 
-    return res.redirect(`/metrics?year=${new Date(serviceDate).getFullYear()}`);
+    const params = new URLSearchParams({
+      year: String(Number.parseInt(req.body.return_year, 10) || new Date(serviceDate).getFullYear()),
+      attendanceType: found ? 'success' : 'warning',
+      attendanceMessage: found ? 'Attendance record updated.' : 'Record not found. It may have been deleted.'
+    });
+    return res.redirect(`/metrics?${params.toString()}`);
   } catch (err) {
     next(err);
   }
@@ -1442,88 +1109,6 @@ app.post('/api/metrics/attendance/:id/delete', async (req, res, next) => {
       return data;
     });
     res.json({ success: true });
-  } catch (err) {
-    next(err);
-  }
-});
-
-app.post('/metrics/import-legacy', async (req, res, next) => {
-  try {
-    const legacy = await readLegacyAttendanceRowsByScrape();
-    if (!legacy.ok) {
-      const params = new URLSearchParams({
-        legacyMessage: legacy.reason,
-        legacyImported: '0',
-        legacyUpdated: '0',
-        legacySkipped: '0'
-      });
-      return res.redirect(`/metrics?${params.toString()}`);
-    }
-
-    let imported = 0;
-    let updated = 0;
-    let skipped = 0;
-
-    await updateData((data) => {
-      data.attendanceRecords = data.attendanceRecords || [];
-      const keyMap = new Map(
-        data.attendanceRecords.map((entry) => {
-          const key = `${toIsoDate(entry.serviceDate)}|${normalizeServiceType(entry.serviceType)}`;
-          return [key, entry];
-        })
-      );
-
-      legacy.rows.forEach((row) => {
-        const serviceDate = toIsoDate(row.serviceDate);
-        const serviceType = normalizeServiceType(row.serviceType);
-        const headcount = Number.parseInt(row.headcount, 10);
-        const note = normalize(row.note);
-
-        if (!serviceDate || Number.isNaN(headcount) || headcount < 0) {
-          skipped += 1;
-          return;
-        }
-
-        const key = `${serviceDate}|${serviceType}`;
-        const existing = keyMap.get(key);
-
-        if (existing) {
-          const changed = existing.headcount !== headcount || normalize(existing.note) !== note;
-          if (changed) {
-            existing.headcount = headcount;
-            existing.note = note;
-            existing.updatedAt = new Date().toISOString();
-            updated += 1;
-          } else {
-            skipped += 1;
-          }
-          return;
-        }
-
-        const newRecord = {
-          id: row.id ? `legacy-att-${row.id}` : id(),
-          serviceDate,
-          serviceType,
-          headcount,
-          note,
-          createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        data.attendanceRecords.push(newRecord);
-        keyMap.set(key, newRecord);
-        imported += 1;
-      });
-
-      return data;
-    });
-
-    const params = new URLSearchParams({
-      legacyMessage: 'Legacy attendance import complete.',
-      legacyImported: String(imported),
-      legacyUpdated: String(updated),
-      legacySkipped: String(skipped)
-    });
-    return res.redirect(`/metrics?${params.toString()}`);
   } catch (err) {
     next(err);
   }
