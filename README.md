@@ -39,8 +39,9 @@ Open `http://localhost:3000`.
 ## Environment variables
 
 - `PORT` (default `3000`)
-- `METRICS_APP_URL` (optional): URL to your legacy metrics app (shows as backup link in Metrics tab)
+- `METRICS_APP_URL` (optional): URL to your pessoas app for one-time attendance import
 - `ATTENDANCE_APP_URL` (optional fallback): legacy metrics URL if `METRICS_APP_URL` is unset
+- `PESSOAS_APP_URL` (optional): explicit pessoas app URL (preferred for import)
 - `PESSOAS_APP_PASSWORD` (optional): password for pessoas app import
   - Compatibility aliases also accepted: `LEGACY_APP_PASSWORD`, `ATTENDANCE_APP_PASSWORD`, `ADMIN_PASSWORD`, `CRM_ADMIN_PASSWORD`
 - `APP_SECRET` (recommended): session secret for login cookies

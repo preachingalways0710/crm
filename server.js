@@ -235,8 +235,39 @@ function normalizeServiceType(value) {
   return ['wed', 'sun_am', 'sun_pm'].includes(serviceType) ? serviceType : 'sun_am';
 }
 
-function getPessoasAppUrl() {
-  return normalize(process.env.METRICS_APP_URL) || normalize(process.env.ATTENDANCE_APP_URL);
+function normalizeUrlWithScheme(value) {
+  const raw = normalize(value);
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return `https://${raw}`;
+}
+
+function getPessoasAppUrls() {
+  const urls = [];
+  const primary = normalize(
+    process.env.PESSOAS_APP_URL ||
+      process.env.METRICS_APP_URL ||
+      process.env.ATTENDANCE_APP_URL ||
+      'https://pessoas.meuibbv.com'
+  );
+
+  const primaryNormalized = normalizeUrlWithScheme(primary);
+  if (primaryNormalized) {
+    urls.push(primaryNormalized);
+  }
+
+  try {
+    const parsed = new URL(primaryNormalized);
+    if (parsed.hostname.endsWith('.co')) {
+      const corrected = new URL(primaryNormalized);
+      corrected.hostname = `${parsed.hostname.slice(0, -3)}.com`;
+      urls.push(corrected.toString());
+    }
+  } catch {
+    // Ignore malformed URL here; readPessoasAttendanceRows will return a helpful error.
+  }
+
+  return Array.from(new Set(urls));
 }
 
 function getPessoasAppPassword() {
@@ -285,7 +316,7 @@ function appendCookies(existingHeader, setCookieHeaders) {
 
 async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  const timeout = setTimeout(() => controller.abort(), 30000);
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } finally {
@@ -404,86 +435,103 @@ async function fetchPessoasPage(url, cookieHeader = '', redirectsLeft = 5) {
   };
 }
 
-async function readPessoasAttendanceRows() {
-  const appUrl = getPessoasAppUrl();
-  if (!appUrl) {
-    return { ok: false, reason: 'Set METRICS_APP_URL to your pessoas app domain first.', rows: [] };
-  }
-
+async function tryReadPessoasAttendanceRows(appUrl) {
   let rootUrl;
   let loginUrl;
   try {
     rootUrl = new URL('/', appUrl).toString();
     loginUrl = new URL('/login', appUrl).toString();
   } catch {
-    return { ok: false, reason: 'METRICS_APP_URL is invalid.', rows: [] };
+    return { ok: false, reason: `Invalid pessoas URL: ${appUrl}`, rows: [] };
   }
 
-  try {
-    let cookieHeader = '';
-    let page = await fetchPessoasPage(rootUrl, cookieHeader);
-    cookieHeader = page.cookieHeader;
+  let cookieHeader = '';
+  let page = await fetchPessoasPage(rootUrl, cookieHeader);
+  cookieHeader = page.cookieHeader;
 
-    let parsed = parsePessoasDashboardHtml(page.html);
-    if (!parsed.rows.length || parsed.loginPageDetected) {
-      const password = getPessoasAppPassword();
-      if (!password) {
-        return {
-          ok: false,
-          reason: 'Set PESSOAS_APP_PASSWORD (or LEGACY_APP_PASSWORD) so CRM can sign in and import.',
-          rows: []
-        };
-      }
-
-      const loginResponse = await fetchWithTimeout(loginUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Accept: 'text/html,application/xhtml+xml',
-          ...(cookieHeader ? { Cookie: cookieHeader } : {})
-        },
-        body: new URLSearchParams({ password }).toString(),
-        redirect: 'manual'
-      });
-
-      cookieHeader = appendCookies(cookieHeader, getSetCookie(loginResponse.headers));
-      const destination = loginResponse.headers.get('location')
-        ? new URL(loginResponse.headers.get('location'), loginUrl).toString()
-        : rootUrl;
-
-      page = await fetchPessoasPage(destination, cookieHeader);
-      cookieHeader = page.cookieHeader;
-      parsed = parsePessoasDashboardHtml(page.html);
-
-      if (parsed.loginPageDetected || parsed.invalidPasswordDetected) {
-        return { ok: false, reason: 'Pessoas login failed. Check PESSOAS_APP_PASSWORD value.', rows: [] };
-      }
+  let parsed = parsePessoasDashboardHtml(page.html);
+  if (!parsed.rows.length || parsed.loginPageDetected) {
+    const password = getPessoasAppPassword();
+    if (!password) {
+      return {
+        ok: false,
+        reason: 'Set PESSOAS_APP_PASSWORD (or LEGACY_APP_PASSWORD) so CRM can sign in and import.',
+        rows: []
+      };
     }
 
-    const merged = new Map();
-    parsed.rows.forEach((row) => upsertPessoasRow(merged, row));
-
-    for (const year of parsed.years) {
-      const yearUrl = new URL(rootUrl);
-      yearUrl.searchParams.set('year', String(year));
-      const yearPage = await fetchPessoasPage(yearUrl.toString(), cookieHeader);
-      const yearParsed = parsePessoasDashboardHtml(yearPage.html);
-      yearParsed.rows.forEach((row) => upsertPessoasRow(merged, row));
-    }
-
-    const rows = Array.from(merged.values()).sort((a, b) => {
-      if (a.serviceDate === b.serviceDate) return a.serviceType.localeCompare(b.serviceType);
-      return a.serviceDate.localeCompare(b.serviceDate);
+    const loginResponse = await fetchWithTimeout(loginUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'text/html,application/xhtml+xml',
+        ...(cookieHeader ? { Cookie: cookieHeader } : {})
+      },
+      body: new URLSearchParams({ password }).toString(),
+      redirect: 'manual'
     });
 
-    if (!rows.length) {
-      return { ok: false, reason: 'No records found on pessoas app.', rows: [] };
-    }
+    cookieHeader = appendCookies(cookieHeader, getSetCookie(loginResponse.headers));
+    const destination = loginResponse.headers.get('location')
+      ? new URL(loginResponse.headers.get('location'), loginUrl).toString()
+      : rootUrl;
 
-    return { ok: true, reason: '', rows };
-  } catch (error) {
-    return { ok: false, reason: `Could not import from pessoas app: ${error.message}`, rows: [] };
+    page = await fetchPessoasPage(destination, cookieHeader);
+    cookieHeader = page.cookieHeader;
+    parsed = parsePessoasDashboardHtml(page.html);
+
+    if (parsed.loginPageDetected || parsed.invalidPasswordDetected) {
+      return { ok: false, reason: 'Pessoas login failed. Check PESSOAS_APP_PASSWORD value.', rows: [] };
+    }
   }
+
+  const merged = new Map();
+  parsed.rows.forEach((row) => upsertPessoasRow(merged, row));
+
+  for (const year of parsed.years) {
+    const yearUrl = new URL(rootUrl);
+    yearUrl.searchParams.set('year', String(year));
+    const yearPage = await fetchPessoasPage(yearUrl.toString(), cookieHeader);
+    const yearParsed = parsePessoasDashboardHtml(yearPage.html);
+    yearParsed.rows.forEach((row) => upsertPessoasRow(merged, row));
+  }
+
+  const rows = Array.from(merged.values()).sort((a, b) => {
+    if (a.serviceDate === b.serviceDate) return a.serviceType.localeCompare(b.serviceType);
+    return a.serviceDate.localeCompare(b.serviceDate);
+  });
+
+  if (!rows.length) {
+    return { ok: false, reason: 'No records found on pessoas app.', rows: [] };
+  }
+
+  return { ok: true, reason: '', rows };
+}
+
+async function readPessoasAttendanceRows() {
+  const candidates = getPessoasAppUrls();
+  if (!candidates.length) {
+    return { ok: false, reason: 'Set METRICS_APP_URL to your pessoas app domain first.', rows: [] };
+  }
+
+  let lastError = '';
+  for (const appUrl of candidates) {
+    try {
+      const result = await tryReadPessoasAttendanceRows(appUrl);
+      if (result.ok) {
+        return result;
+      }
+      lastError = result.reason || lastError;
+    } catch (error) {
+      lastError = `Could not import from ${appUrl}: ${error.message}`;
+    }
+  }
+
+  return {
+    ok: false,
+    reason: lastError || 'Could not import from pessoas app.',
+    rows: []
+  };
 }
 
 const membershipTypes = ['Prospect', 'Member', 'Voting Member'];
@@ -1112,11 +1160,6 @@ app.get('/metrics', async (req, res, next) => {
     const selectedYear = Number.parseInt(req.query.year, 10);
     const year = Number.isNaN(selectedYear) ? currentYear : selectedYear;
     const totalPeople = data.people.length;
-    const metricsAppUrl =
-      process.env.METRICS_APP_URL ||
-      process.env.ATTENDANCE_APP_URL ||
-      data.settings.attendanceAppUrl;
-
     const birthdaysThisMonth = data.people.filter((person) => {
       if (!person.birthday) return false;
       return new Date(person.birthday).getMonth() === now.getMonth();
@@ -1194,7 +1237,6 @@ app.get('/metrics', async (req, res, next) => {
 
     res.render('metrics', {
       activeTab: 'metrics',
-      metricsAppUrl,
       year,
       years,
       chartData,
