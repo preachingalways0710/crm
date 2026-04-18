@@ -9,6 +9,7 @@ A focused, self-hosted church operations interface for:
 - CSV and Excel people import (XLS/XLSX export migration)
 - Membership type classification (Prospect, Member, Voting Member)
 - Integrated attendance metrics module (yearly chart, add/edit data, year-based records)
+- One-click import from existing pessoas attendance app
 - Yearly calendar planning
 - Calendar birthday overlay toggle
 - Registration forms (starter level)
@@ -40,6 +41,8 @@ Open `http://localhost:3000`.
 - `PORT` (default `3000`)
 - `METRICS_APP_URL` (optional): URL to your legacy metrics app (shows as backup link in Metrics tab)
 - `ATTENDANCE_APP_URL` (optional fallback): legacy metrics URL if `METRICS_APP_URL` is unset
+- `PESSOAS_APP_PASSWORD` (optional): password for pessoas app import
+  - Compatibility aliases also accepted: `LEGACY_APP_PASSWORD`, `ATTENDANCE_APP_PASSWORD`, `ADMIN_PASSWORD`, `CRM_ADMIN_PASSWORD`
 - `APP_SECRET` (recommended): session secret for login cookies
 - `CRM_ADMIN_PASSWORD` (recommended): enables login protection for all CRM routes except `/register/*`
   - Compatibility aliases also accepted: `ADMIN_PASSWORD`, `APP_PASSWORD`, `PASSWORD`
@@ -59,7 +62,7 @@ Open `http://localhost:3000`.
 6. Start/entry file: `server.js`
 7. Deploy.
 
-If using `METRICS_APP_URL` (or `ATTENDANCE_APP_URL`), DB vars, or login vars, set them in Node.js app environment variables in hPanel.
+If using `METRICS_APP_URL` (or `ATTENDANCE_APP_URL`), `PESSOAS_APP_PASSWORD`, DB vars, or login vars, set them in Node.js app environment variables in hPanel.
 
 ## Data backup
 

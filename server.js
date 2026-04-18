@@ -4,6 +4,7 @@ const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
 const XLSX = require('xlsx');
+const cheerio = require('cheerio');
 const { parse } = require('csv-parse/sync');
 const { readData, updateData } = require('./lib/dataStore');
 
@@ -23,11 +24,12 @@ app.use(
     secret: process.env.APP_SECRET || 'dev-only-secret-change-me',
     resave: false,
     saveUninitialized: false,
+    rolling: true,
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
       secure: 'auto',
-      maxAge: 1000 * 60 * 60 * 12
+      maxAge: 1000 * 60 * 60 * 24 * 30
     }
   })
 );
@@ -233,6 +235,257 @@ function normalizeServiceType(value) {
   return ['wed', 'sun_am', 'sun_pm'].includes(serviceType) ? serviceType : 'sun_am';
 }
 
+function getPessoasAppUrl() {
+  return normalize(process.env.METRICS_APP_URL) || normalize(process.env.ATTENDANCE_APP_URL);
+}
+
+function getPessoasAppPassword() {
+  const candidates = [
+    process.env.PESSOAS_APP_PASSWORD,
+    process.env.LEGACY_APP_PASSWORD,
+    process.env.ATTENDANCE_APP_PASSWORD,
+    process.env.ADMIN_PASSWORD,
+    process.env.CRM_ADMIN_PASSWORD,
+    process.env.admin_password
+  ];
+
+  const first = candidates.find((value) => normalize(value));
+  return normalize(first);
+}
+
+function getSetCookie(headers) {
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+  const single = headers.get('set-cookie');
+  return single ? [single] : [];
+}
+
+function appendCookies(existingHeader, setCookieHeaders) {
+  const cookies = new Map();
+  normalize(existingHeader)
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((entry) => {
+      const idx = entry.indexOf('=');
+      if (idx > 0) cookies.set(entry.slice(0, idx), entry.slice(idx + 1));
+    });
+
+  (setCookieHeaders || []).forEach((header) => {
+    const firstPair = normalize(header).split(';')[0];
+    const idx = firstPair.indexOf('=');
+    if (idx > 0) cookies.set(firstPair.slice(0, idx), firstPair.slice(idx + 1));
+  });
+
+  return Array.from(cookies.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parsePessoasServiceType(value) {
+  const raw = normalize(value).toLowerCase();
+  if (!raw) return '';
+  if (raw.includes('wed')) return 'wed';
+  if (raw.includes('sun') && raw.includes('pm')) return 'sun_pm';
+  if (raw.includes('sun') && raw.includes('am')) return 'sun_am';
+  if (raw === 'wed') return 'wed';
+  if (raw === 'sun_pm') return 'sun_pm';
+  if (raw === 'sun_am') return 'sun_am';
+  return '';
+}
+
+function upsertPessoasRow(bucket, row) {
+  const serviceDate = toIsoDate(row.serviceDate);
+  const serviceType = parsePessoasServiceType(row.serviceType);
+  const headcount = Number.parseInt(row.headcount, 10);
+  const note = normalize(row.note);
+
+  if (!serviceDate || !serviceType || Number.isNaN(headcount) || headcount < 0) {
+    return;
+  }
+
+  const key = `${serviceDate}|${serviceType}`;
+  bucket.set(key, { serviceDate, serviceType, headcount, note });
+}
+
+function parsePessoasDashboardHtml(html) {
+  const $ = cheerio.load(html || '');
+  const rows = new Map();
+
+  $('table tbody tr').each((_, tr) => {
+    const cells = $(tr).find('td');
+    if (cells.length < 3) return;
+
+    const classNames = normalize($(cells[1]).find('.badge').attr('class'));
+    const classMatch = classNames.match(/badge-(wed|sun_am|sun_pm)/);
+    const serviceType = classMatch ? classMatch[1] : parsePessoasServiceType($(cells[1]).text());
+
+    upsertPessoasRow(rows, {
+      serviceDate: $(cells[0]).text(),
+      serviceType,
+      headcount: $(cells[2]).text(),
+      note: cells.length > 3 ? $(cells[3]).text() : ''
+    });
+  });
+
+  const scriptBlob = $('script')
+    .map((_, script) => $(script).html() || '')
+    .get()
+    .find((content) => content.includes('const chartData ='));
+
+  if (scriptBlob) {
+    const match = scriptBlob.match(/const\s+chartData\s*=\s*(\{[\s\S]*?\})\s*;/);
+    if (match) {
+      try {
+        const chartData = JSON.parse(match[1]);
+        ['wed', 'sun_am', 'sun_pm'].forEach((serviceType) => {
+          (chartData[serviceType] || []).forEach((point) => {
+            upsertPessoasRow(rows, {
+              serviceDate: point.x,
+              serviceType,
+              headcount: point.y,
+              note: ''
+            });
+          });
+        });
+      } catch {
+        // Keep table rows only if chart parse fails.
+      }
+    }
+  }
+
+  const years = $('#year option')
+    .map((_, option) => Number.parseInt(normalize($(option).attr('value') || $(option).text()), 10))
+    .get()
+    .filter((year) => Number.isInteger(year));
+
+  const loginPageDetected = $('form[action="/login"], form[action*="login"]').length > 0;
+  const invalidPasswordDetected = /incorrect password/i.test($.text());
+
+  return {
+    rows: Array.from(rows.values()),
+    years: Array.from(new Set(years)),
+    loginPageDetected,
+    invalidPasswordDetected
+  };
+}
+
+async function fetchPessoasPage(url, cookieHeader = '', redirectsLeft = 5) {
+  const response = await fetchWithTimeout(url, {
+    method: 'GET',
+    headers: {
+      Accept: 'text/html,application/xhtml+xml',
+      ...(cookieHeader ? { Cookie: cookieHeader } : {})
+    },
+    redirect: 'manual'
+  });
+
+  const updatedCookieHeader = appendCookies(cookieHeader, getSetCookie(response.headers));
+  const location = response.headers.get('location');
+  if (location && response.status >= 300 && response.status < 400 && redirectsLeft > 0) {
+    const nextUrl = new URL(location, url).toString();
+    return fetchPessoasPage(nextUrl, updatedCookieHeader, redirectsLeft - 1);
+  }
+
+  return {
+    html: await response.text(),
+    cookieHeader: updatedCookieHeader
+  };
+}
+
+async function readPessoasAttendanceRows() {
+  const appUrl = getPessoasAppUrl();
+  if (!appUrl) {
+    return { ok: false, reason: 'Set METRICS_APP_URL to your pessoas app domain first.', rows: [] };
+  }
+
+  let rootUrl;
+  let loginUrl;
+  try {
+    rootUrl = new URL('/', appUrl).toString();
+    loginUrl = new URL('/login', appUrl).toString();
+  } catch {
+    return { ok: false, reason: 'METRICS_APP_URL is invalid.', rows: [] };
+  }
+
+  try {
+    let cookieHeader = '';
+    let page = await fetchPessoasPage(rootUrl, cookieHeader);
+    cookieHeader = page.cookieHeader;
+
+    let parsed = parsePessoasDashboardHtml(page.html);
+    if (!parsed.rows.length || parsed.loginPageDetected) {
+      const password = getPessoasAppPassword();
+      if (!password) {
+        return {
+          ok: false,
+          reason: 'Set PESSOAS_APP_PASSWORD (or LEGACY_APP_PASSWORD) so CRM can sign in and import.',
+          rows: []
+        };
+      }
+
+      const loginResponse = await fetchWithTimeout(loginUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'text/html,application/xhtml+xml',
+          ...(cookieHeader ? { Cookie: cookieHeader } : {})
+        },
+        body: new URLSearchParams({ password }).toString(),
+        redirect: 'manual'
+      });
+
+      cookieHeader = appendCookies(cookieHeader, getSetCookie(loginResponse.headers));
+      const destination = loginResponse.headers.get('location')
+        ? new URL(loginResponse.headers.get('location'), loginUrl).toString()
+        : rootUrl;
+
+      page = await fetchPessoasPage(destination, cookieHeader);
+      cookieHeader = page.cookieHeader;
+      parsed = parsePessoasDashboardHtml(page.html);
+
+      if (parsed.loginPageDetected || parsed.invalidPasswordDetected) {
+        return { ok: false, reason: 'Pessoas login failed. Check PESSOAS_APP_PASSWORD value.', rows: [] };
+      }
+    }
+
+    const merged = new Map();
+    parsed.rows.forEach((row) => upsertPessoasRow(merged, row));
+
+    for (const year of parsed.years) {
+      const yearUrl = new URL(rootUrl);
+      yearUrl.searchParams.set('year', String(year));
+      const yearPage = await fetchPessoasPage(yearUrl.toString(), cookieHeader);
+      const yearParsed = parsePessoasDashboardHtml(yearPage.html);
+      yearParsed.rows.forEach((row) => upsertPessoasRow(merged, row));
+    }
+
+    const rows = Array.from(merged.values()).sort((a, b) => {
+      if (a.serviceDate === b.serviceDate) return a.serviceType.localeCompare(b.serviceType);
+      return a.serviceDate.localeCompare(b.serviceDate);
+    });
+
+    if (!rows.length) {
+      return { ok: false, reason: 'No records found on pessoas app.', rows: [] };
+    }
+
+    return { ok: true, reason: '', rows };
+  } catch (error) {
+    return { ok: false, reason: `Could not import from pessoas app: ${error.message}`, rows: [] };
+  }
+}
+
 const membershipTypes = ['Prospect', 'Member', 'Voting Member'];
 const genderOptions = ['Male', 'Female', 'Unspecified'];
 const serviceTypes = ['wed', 'sun_am', 'sun_pm'];
@@ -256,7 +509,9 @@ function getAuthPassword() {
     process.env.CRM_ADMIN_PASSWORD,
     process.env.ADMIN_PASSWORD,
     process.env.APP_PASSWORD,
-    process.env.PASSWORD
+    process.env.PASSWORD,
+    process.env.admin_password,
+    process.env.password
   ];
 
   const first = candidates.find((value) => normalize(value).length > 0);
@@ -268,6 +523,8 @@ function authPasswordSource() {
   if (normalize(process.env.ADMIN_PASSWORD)) return 'ADMIN_PASSWORD';
   if (normalize(process.env.APP_PASSWORD)) return 'APP_PASSWORD';
   if (normalize(process.env.PASSWORD)) return 'PASSWORD';
+  if (normalize(process.env.admin_password)) return 'admin_password';
+  if (normalize(process.env.password)) return 'password';
   return '';
 }
 
@@ -416,6 +673,10 @@ app.get('/login', (req, res) => {
   }
 
   if (req.session?.isAuthenticated) {
+    const returnTo = normalize(req.query.returnTo);
+    if (returnTo.startsWith('/')) {
+      return res.redirect(returnTo);
+    }
     return res.redirect('/people');
   }
 
@@ -1095,6 +1356,84 @@ app.post('/metrics/entry/:id/update', async (req, res, next) => {
       year: String(Number.parseInt(req.body.return_year, 10) || new Date(serviceDate).getFullYear()),
       attendanceType: found ? 'success' : 'warning',
       attendanceMessage: found ? 'Attendance record updated.' : 'Record not found. It may have been deleted.'
+    });
+    return res.redirect(`/metrics?${params.toString()}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/metrics/import-pessoas', async (req, res, next) => {
+  try {
+    const source = await readPessoasAttendanceRows();
+    if (!source.ok) {
+      const params = new URLSearchParams({
+        year: String(Number.parseInt(req.body.year, 10) || new Date().getFullYear()),
+        attendanceType: 'warning',
+        attendanceMessage: source.reason
+      });
+      return res.redirect(`/metrics?${params.toString()}`);
+    }
+
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    await updateData((data) => {
+      data.attendanceRecords = data.attendanceRecords || [];
+      const existingByKey = new Map(
+        data.attendanceRecords.map((entry) => [
+          `${toIsoDate(entry.serviceDate)}|${normalizeServiceType(entry.serviceType)}`,
+          entry
+        ])
+      );
+
+      source.rows.forEach((row) => {
+        const serviceDate = toIsoDate(row.serviceDate);
+        const serviceType = normalizeServiceType(row.serviceType);
+        const headcount = Number.parseInt(row.headcount, 10);
+        const note = normalize(row.note);
+        if (!serviceDate || Number.isNaN(headcount) || headcount < 0) {
+          skipped += 1;
+          return;
+        }
+
+        const key = `${serviceDate}|${serviceType}`;
+        const existing = existingByKey.get(key);
+        if (existing) {
+          const changed = existing.headcount !== headcount || normalize(existing.note) !== note;
+          if (!changed) {
+            skipped += 1;
+            return;
+          }
+          existing.headcount = headcount;
+          existing.note = note;
+          existing.updatedAt = new Date().toISOString();
+          updated += 1;
+          return;
+        }
+
+        const created = {
+          id: id(),
+          serviceDate,
+          serviceType,
+          headcount,
+          note,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        data.attendanceRecords.push(created);
+        existingByKey.set(key, created);
+        imported += 1;
+      });
+
+      return data;
+    });
+
+    const params = new URLSearchParams({
+      year: String(Number.parseInt(req.body.year, 10) || new Date().getFullYear()),
+      attendanceType: 'success',
+      attendanceMessage: `Pessoas import complete. Imported ${imported}, updated ${updated}, skipped ${skipped}.`
     });
     return res.redirect(`/metrics?${params.toString()}`);
   } catch (err) {

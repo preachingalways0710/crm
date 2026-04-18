@@ -55,6 +55,10 @@
               <% }) %>
             </select>
           </form>
+          <form method="post" action="/metrics/import-pessoas" onsubmit="return confirm('Import existing attendance from pessoas app now?');">
+            <input type="hidden" name="year" value="<%= year %>" />
+            <button class="btn btn-outline-secondary btn-sm" type="submit">Import Pessoas Data</button>
+          </form>
           <a class="btn btn-primary btn-sm" href="/metrics/entry?year=<%= year %>">+ Add Data</a>
         </div>
       </div>
