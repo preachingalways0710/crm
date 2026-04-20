@@ -1285,6 +1285,7 @@ app.get('/settings/church', async (req, res, next) => {
 
 app.post('/settings/church', requireAdmin, async (req, res, next) => {
   try {
+    let geocodeStatus = 'none';
     const churchSettings = hydrateChurchSettings({
       name: req.body.name,
       email: req.body.email,
@@ -1292,42 +1293,59 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       address: req.body.address,
       city: req.body.city,
       state: req.body.state,
-      zipCode: req.body.zipCode,
-      mapLat: req.body.mapLat,
-      mapLng: req.body.mapLng
+      zipCode: req.body.zipCode
     });
 
     const mapCenterZoom = normalizeMapZoom(req.body.mapCenterZoom, 13);
-    const shouldGeocode = !churchSettings.mapLat || !churchSettings.mapLng;
     const geocodeQuery = formatChurchAddress(churchSettings);
-    let geocodeStatus = 'none';
 
-    if (shouldGeocode && geocodeQuery) {
-      const geocoded = await geocodeAddress(geocodeQuery);
-      if (geocoded) {
-        churchSettings.mapLat = geocoded.lat;
-        churchSettings.mapLng = geocoded.lng;
-        geocodeStatus = 'success';
-      } else {
-        geocodeStatus = 'failed';
-      }
+    if (!geocodeQuery) {
+      const params = new URLSearchParams({
+        saved: '0',
+        geocode: 'missing_address'
+      });
+      return res.redirect(`/settings/church?${params.toString()}`);
+    }
+
+    const geocoded = await geocodeAddress(geocodeQuery);
+    if (geocoded) {
+      churchSettings.mapLat = geocoded.lat;
+      churchSettings.mapLng = geocoded.lng;
+      geocodeStatus = 'success';
+    } else {
+      geocodeStatus = 'failed';
     }
 
     await updateData((data) => {
       data.settings = data.settings || {};
-      data.settings.church = churchSettings;
+      const previousChurchSettings = hydrateChurchSettings((data.settings || {}).church);
+
+      if (churchSettings.mapLat && churchSettings.mapLng) {
+        data.settings.church = churchSettings;
+      } else if (previousChurchSettings.mapLat && previousChurchSettings.mapLng) {
+        // Keep prior resolved coordinates if geocoding is temporarily unavailable.
+        data.settings.church = {
+          ...churchSettings,
+          mapLat: previousChurchSettings.mapLat,
+          mapLng: previousChurchSettings.mapLng
+        };
+        geocodeStatus = 'failed_using_previous';
+      } else {
+        data.settings.church = churchSettings;
+      }
 
       const currentVisitation = hydrateVisitationSettings((data.settings || {}).visitation, data.people || []);
+      const resolvedChurchSettings = hydrateChurchSettings(data.settings.church);
       data.settings.visitation = {
         ...currentVisitation,
         mapCenterMode: 'church',
         mapCenterZoom,
         profilePersonId: '',
         churchProfile: {
-          name: churchSettings.name,
+          name: resolvedChurchSettings.name,
           address: geocodeQuery,
-          lat: churchSettings.mapLat,
-          lng: churchSettings.mapLng
+          lat: resolvedChurchSettings.mapLat,
+          lng: resolvedChurchSettings.mapLng
         }
       };
 

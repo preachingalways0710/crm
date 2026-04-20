@@ -20,7 +20,13 @@
     <div class="alert alert-info" role="alert">Map coordinates were auto-filled from the church address.</div>
   <% } %>
   <% if (geocodeStatus === 'failed') { %>
-    <div class="alert alert-warning" role="alert">Could not auto-detect coordinates from address. Please set latitude and longitude manually.</div>
+    <div class="alert alert-warning" role="alert">Could not auto-detect map coordinates from address right now.</div>
+  <% } %>
+  <% if (geocodeStatus === 'failed_using_previous') { %>
+    <div class="alert alert-warning" role="alert">Could not refresh coordinates now. Keeping previously saved map location.</div>
+  <% } %>
+  <% if (geocodeStatus === 'missing_address') { %>
+    <div class="alert alert-warning" role="alert">Please provide church address details so we can auto-set the map base.</div>
   <% } %>
   <% if (isReadOnly) { %>
     <div class="alert alert-secondary" role="alert">Read-only view. Only admin users can edit church settings.</div>
@@ -96,20 +102,23 @@
             <span class="text-secondary"><i class="bi bi-compass me-1"></i>Used by Visitation</span>
           </div>
           <div class="card-body row g-2">
-            <div class="col-12 col-md-3">
-              <label class="form-label">Map Latitude</label>
-              <input class="form-control" name="mapLat" value="<%= churchSettings.mapLat || '' %>" placeholder="-8.7619" />
+            <div class="col-12 col-md-4">
+              <label class="form-label">Detected Latitude</label>
+              <input class="form-control" value="<%= churchSettings.mapLat || '-' %>" disabled />
             </div>
-            <div class="col-12 col-md-3">
-              <label class="form-label">Map Longitude</label>
-              <input class="form-control" name="mapLng" value="<%= churchSettings.mapLng || '' %>" placeholder="-63.9039" />
+            <div class="col-12 col-md-4">
+              <label class="form-label">Detected Longitude</label>
+              <input class="form-control" value="<%= churchSettings.mapLng || '-' %>" disabled />
             </div>
             <div class="col-12 col-md-2">
               <label class="form-label">Default Zoom</label>
               <input class="form-control" name="mapCenterZoom" type="number" min="3" max="20" value="<%= mapCenterZoom || 13 %>" />
             </div>
-            <div class="col-12 col-md-4 d-flex align-items-end">
-              <p class="text-secondary mb-0">If map coordinates are blank, the system auto-detects from address on save.</p>
+            <div class="col-12 col-md-2 d-flex align-items-end">
+              <span class="badge bg-blue-lt">Auto</span>
+            </div>
+            <div class="col-12">
+              <p class="text-secondary mb-0">Coordinates are automatically detected from address + city/state/ZIP when you save.</p>
             </div>
           </div>
         </div>
