@@ -29,62 +29,126 @@
       <div class="col-12 col-md-2 d-flex align-items-end">
         <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
       </div>
+      <div class="col-12">
+        <div class="btn-group" role="group" aria-label="Follow-up view">
+          <a class="btn btn-sm <%= view === 'table' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=table">Table</a>
+          <a class="btn btn-sm <%= view === 'board' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=board">Board</a>
+        </div>
+      </div>
     </form>
   </div>
 
-  <div class="table-responsive">
-    <table class="table table-vcenter">
-      <thead>
-        <tr>
-          <th>Person</th>
-          <th>Task</th>
-          <th>Stage</th>
-          <th>Due Date</th>
-          <th>Status</th>
-          <th>Notes</th>
-          <th class="w-1"></th>
-        </tr>
-      </thead>
-      <tbody>
-        <% if (!queue.length) { %>
-          <tr><td colspan="7" class="text-secondary">No follow-ups found for this filter.</td></tr>
-        <% } %>
-
-        <% queue.forEach((item) => { %>
+  <% if (view === 'table') { %>
+    <div class="table-responsive">
+      <table class="table table-vcenter">
+        <thead>
           <tr>
-            <td><a href="<%= item.personLink %>"><%= item.personName %></a></td>
-            <td><%= item.title %></td>
-            <td>
-              <form method="post" action="/followups/<%= item.id %>/stage" class="d-flex gap-2">
-                <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>" />
-                <select class="form-select form-select-sm" name="stage" onchange="this.form.submit()">
-                  <% followUpStages.forEach((stageOption) => { %>
-                    <option value="<%= stageOption.value %>" <%= item.stage === stageOption.value ? 'selected' : '' %>><%= stageOption.label %></option>
-                  <% }) %>
-                </select>
-              </form>
-            </td>
-            <td><%= item.dueDate || '-' %></td>
-            <td><span class="badge <%= item.status === 'completed' ? 'bg-green-lt' : 'bg-orange-lt' %>"><%= item.status %></span></td>
-            <td><%= item.notes || '-' %></td>
-            <td>
-              <% if (item.status === 'completed') { %>
-                <form method="post" action="/followups/<%= item.id %>/reopen">
-                  <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>" />
-                  <button class="btn btn-outline-secondary btn-sm" type="submit">Reopen</button>
-                </form>
-              <% } else { %>
-                <form method="post" action="/followups/<%= item.id %>/complete">
-                  <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>" />
-                  <button class="btn btn-primary btn-sm" type="submit">Complete</button>
-                </form>
-              <% } %>
-            </td>
+            <th>Person</th>
+            <th>Task</th>
+            <th>Stage</th>
+            <th>Due Date</th>
+            <th>Status</th>
+            <th>Notes</th>
+            <th class="w-1"></th>
           </tr>
+        </thead>
+        <tbody>
+          <% if (!queue.length) { %>
+            <tr><td colspan="7" class="text-secondary">No follow-ups found for this filter.</td></tr>
+          <% } %>
+
+          <% queue.forEach((item) => { %>
+            <tr>
+              <td><a href="<%= item.personLink %>"><%= item.personName %></a></td>
+              <td><%= item.title %></td>
+              <td>
+                <form method="post" action="/followups/<%= item.id %>/stage" class="d-flex gap-2">
+                  <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                  <select class="form-select form-select-sm" name="stage" onchange="this.form.submit()">
+                    <% followUpStages.forEach((stageOption) => { %>
+                      <option value="<%= stageOption.value %>" <%= item.stage === stageOption.value ? 'selected' : '' %>><%= stageOption.label %></option>
+                    <% }) %>
+                  </select>
+                </form>
+              </td>
+              <td><%= item.dueDate || '-' %></td>
+              <td><span class="badge <%= item.status === 'completed' ? 'bg-green-lt' : 'bg-orange-lt' %>"><%= item.status %></span></td>
+              <td><%= item.notes || '-' %></td>
+              <td>
+                <% if (item.status === 'completed') { %>
+                  <form method="post" action="/followups/<%= item.id %>/reopen">
+                    <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                    <button class="btn btn-outline-secondary btn-sm" type="submit">Reopen</button>
+                  </form>
+                <% } else { %>
+                  <form method="post" action="/followups/<%= item.id %>/complete">
+                    <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                    <button class="btn btn-primary btn-sm" type="submit">Complete</button>
+                  </form>
+                <% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+
+  <% if (view === 'board') { %>
+    <div class="card-body">
+      <div class="row g-3">
+        <% board.forEach((column) => { %>
+          <div class="col-12 col-md-6 col-xl-4">
+            <div class="border rounded p-2 h-100">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong><%= column.label %></strong>
+                <span class="badge bg-secondary-lt"><%= column.items.length %></span>
+              </div>
+
+              <% if (!column.items.length) { %>
+                <div class="text-secondary small">No items in this stage.</div>
+              <% } %>
+
+              <div class="d-grid gap-2">
+                <% column.items.forEach((item) => { %>
+                  <div class="border rounded p-2 bg-white">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                      <a href="<%= item.personLink %>" class="fw-semibold text-decoration-none"><%= item.personName %></a>
+                      <span class="badge <%= item.status === 'completed' ? 'bg-green-lt' : 'bg-orange-lt' %>"><%= item.status %></span>
+                    </div>
+                    <div><strong><%= item.title %></strong></div>
+                    <div class="text-secondary small">Due: <%= item.dueDate || '-' %></div>
+                    <div class="text-secondary small mb-2"><%= item.notes || 'No notes' %></div>
+
+                    <form method="post" action="/followups/<%= item.id %>/stage" class="mb-2">
+                      <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                      <select class="form-select form-select-sm" name="stage" onchange="this.form.submit()">
+                        <% followUpStages.forEach((stageOption) => { %>
+                          <option value="<%= stageOption.value %>" <%= item.stage === stageOption.value ? 'selected' : '' %>><%= stageOption.label %></option>
+                        <% }) %>
+                      </select>
+                    </form>
+
+                    <% if (item.status === 'completed') { %>
+                      <form method="post" action="/followups/<%= item.id %>/reopen">
+                        <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                        <button class="btn btn-outline-secondary btn-sm w-100" type="submit">Reopen</button>
+                      </form>
+                    <% } else { %>
+                      <form method="post" action="/followups/<%= item.id %>/complete">
+                        <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                        <button class="btn btn-primary btn-sm w-100" type="submit">Complete</button>
+                      </form>
+                    <% } %>
+                  </div>
+                <% }) %>
+              </div>
+            </div>
+          </div>
         <% }) %>
-      </tbody>
-    </table>
-  </div>
+      </div>
+    </div>
+  <% } %>
 </div>
 
 <%- include('partials-footer') %>

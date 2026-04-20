@@ -7,16 +7,25 @@
 <div class="card">
   <div class="card-header"><h3 class="card-title">Add Person</h3></div>
   <div class="card-body">
+    <% if (errorMessage) { %>
+      <div class="alert alert-warning" role="alert">
+        <strong><%= errorMessage %></strong>
+        <% if (duplicateId) { %>
+          <div class="mt-2"><a class="btn btn-sm btn-outline-primary" href="/people/<%= duplicateId %>">Open Existing Person</a></div>
+        <% } %>
+      </div>
+    <% } %>
+
     <form method="post" action="/people" class="row g-2">
       <div class="col-12 col-md-6">
         <label class="form-label">Full Name</label>
-        <input class="form-control" name="name" required />
+        <input class="form-control" name="name" value="<%= formData?.name || '' %>" required />
       </div>
       <div class="col-12 col-md-3">
         <label class="form-label">Gender</label>
         <select class="form-select" name="gender">
           <% genderOptions.forEach((option) => { %>
-            <option value="<%= option %>"><%= option %></option>
+            <option value="<%= option %>" <%= (formData?.gender || '') === option ? 'selected' : '' %>><%= option %></option>
           <% }) %>
         </select>
       </div>
@@ -24,53 +33,53 @@
         <label class="form-label">Membership Type</label>
         <select class="form-select" name="membershipType">
           <% membershipTypes.forEach((type) => { %>
-            <option value="<%= type %>" <%= type === 'Prospect' ? 'selected' : '' %>><%= type %></option>
+            <option value="<%= type %>" <%= (formData?.membershipType || 'Prospect') === type ? 'selected' : '' %>><%= type %></option>
           <% }) %>
         </select>
       </div>
 
       <div class="col-12 col-md-4">
         <label class="form-label">Phone</label>
-        <input class="form-control" name="phone" />
+        <input class="form-control" name="phone" value="<%= formData?.phone || '' %>" />
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label">Email</label>
-        <input class="form-control" name="email" type="email" />
+        <input class="form-control" name="email" type="email" value="<%= formData?.email || '' %>" />
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label">Birthday (dd/mm/yyyy)</label>
-        <input class="form-control" name="birthday" placeholder="27/09/2009" />
+        <input class="form-control" name="birthday" placeholder="27/09/2009" value="<%= formData?.birthday || '' %>" />
       </div>
 
       <div class="col-12 col-md-4">
         <label class="form-label">Section</label>
-        <input class="form-control" name="sectionId" placeholder="North-1" />
+        <input class="form-control" name="sectionId" placeholder="North-1" value="<%= formData?.sectionId || '' %>" />
       </div>
       <div class="col-12 col-md-8">
         <label class="form-label">Tags (comma separated)</label>
-        <input class="form-control" name="tags" placeholder="visitor, youth, choir" />
+        <input class="form-control" name="tags" placeholder="visitor, youth, choir" value="<%= formData?.tags || '' %>" />
       </div>
       <div class="col-12">
         <label class="form-label">Address</label>
-        <input class="form-control" name="address" />
+        <input class="form-control" name="address" value="<%= formData?.address || '' %>" />
       </div>
 
       <div class="col-12 col-md-4">
         <label class="form-label">City</label>
-        <input class="form-control" name="city" />
+        <input class="form-control" name="city" value="<%= formData?.city || '' %>" />
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label">State</label>
-        <input class="form-control" name="state" />
+        <input class="form-control" name="state" value="<%= formData?.state || '' %>" />
       </div>
       <div class="col-12 col-md-4">
         <label class="form-label">ZIP</label>
-        <input class="form-control" name="zipCode" />
+        <input class="form-control" name="zipCode" value="<%= formData?.zipCode || '' %>" />
       </div>
 
       <div class="col-12">
         <label class="form-label">Notes</label>
-        <textarea class="form-control" name="notes" rows="4"></textarea>
+        <textarea class="form-control" name="notes" rows="4"><%= formData?.notes || '' %></textarea>
       </div>
       <div class="col-12">
         <button type="submit" class="btn btn-primary">Create Person</button>

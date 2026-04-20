@@ -1028,8 +1028,29 @@ app.get('/people', async (req, res, next) => {
 
 app.get('/people/new', async (req, res, next) => {
   try {
+    const isDuplicateError = normalize(req.query.error) === 'duplicate';
+    const duplicateId = normalize(req.query.duplicateId);
     res.render('people-new', {
-      activeTab: 'people_new'
+      activeTab: 'people_new',
+      errorMessage: isDuplicateError
+        ? 'Possible duplicate found. Open the existing record or adjust the details before creating.'
+        : '',
+      duplicateId,
+      formData: {
+        name: normalize(req.query.name),
+        phone: normalize(req.query.phone),
+        email: normalize(req.query.email),
+        gender: normalize(req.query.gender),
+        membershipType: normalize(req.query.membershipType),
+        birthday: normalize(req.query.birthday),
+        sectionId: normalize(req.query.sectionId),
+        tags: normalize(req.query.tags),
+        address: normalize(req.query.address),
+        city: normalize(req.query.city),
+        state: normalize(req.query.state),
+        zipCode: normalize(req.query.zipCode),
+        notes: normalize(req.query.notes)
+      }
     });
   } catch (err) {
     next(err);
@@ -1158,10 +1179,53 @@ app.post('/people', async (req, res, next) => {
       return res.redirect('/people/new');
     }
 
+    let duplicateId = '';
     await updateData((data) => {
+      const incomingName = normalize(person.name).toLowerCase();
+      const incomingPhone = normalizePhone(person.phone);
+      const incomingEmail = normalize(person.email).toLowerCase();
+
+      const duplicate = data.people.find((existing) => {
+        const existingName = normalize(existing.name).toLowerCase();
+        const existingPhone = normalizePhone(existing.phone);
+        const existingEmail = normalize(existing.email).toLowerCase();
+
+        const sameEmail = incomingEmail && existingEmail && incomingEmail === existingEmail;
+        const samePhone = incomingPhone && existingPhone && incomingPhone === existingPhone;
+        const sameNameAndPhone = incomingName && samePhone && incomingName === existingName;
+
+        return sameEmail || sameNameAndPhone;
+      });
+
+      if (duplicate) {
+        duplicateId = duplicate.id;
+        return data;
+      }
+
       data.people.push(person);
       return data;
     });
+
+    if (duplicateId) {
+      const params = new URLSearchParams({
+        error: 'duplicate',
+        duplicateId,
+        name: person.name,
+        phone: person.phone,
+        email: person.email,
+        gender: person.gender,
+        membershipType: person.membershipType,
+        birthday: person.birthday ? formatDateDMY(person.birthday) : '',
+        sectionId: person.sectionId,
+        tags: (person.tags || []).join(', '),
+        address: person.address,
+        city: person.city,
+        state: person.state,
+        zipCode: person.zipCode,
+        notes: person.notes
+      });
+      return res.redirect(`/people/new?${params.toString()}`);
+    }
 
     res.redirect(`/people/${person.id}`);
   } catch (err) {
@@ -1356,6 +1420,7 @@ app.get('/followups', async (req, res, next) => {
     const data = await readData();
     const status = normalize(req.query.status) || 'open';
     const stage = normalizeFollowUpStageFilter(req.query.stage);
+    const view = normalize(req.query.view) === 'board' ? 'board' : 'table';
 
     const peopleById = data.people.reduce((acc, person) => {
       acc[person.id] = person;
@@ -1388,11 +1453,18 @@ app.get('/followups', async (req, res, next) => {
       queue = queue.filter((item) => item.stage === stage);
     }
 
+    const board = followUpStages.map((stageOption) => ({
+      ...stageOption,
+      items: queue.filter((item) => item.stage === stageOption.value)
+    }));
+
     res.render('followups', {
       activeTab: 'followups',
       queue,
       status,
-      stage
+      stage,
+      view,
+      board
     });
   } catch (err) {
     next(err);
