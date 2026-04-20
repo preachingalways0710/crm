@@ -14,10 +14,13 @@ body {
 }
 
 #map {
-  min-height: 520px;
+  min-height: 560px;
   border: 1px solid #d8dee9;
   border-radius: 8px;
-  margin-top: 1rem;
+}
+
+#listWrap {
+  min-height: 240px;
 }
 
 .section-row {
@@ -32,6 +35,152 @@ body {
   border-bottom: 0;
 }
 
+.visitation-sidebar .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  padding: 0.35rem;
+  margin-bottom: 0.5rem;
+  background: #ffffff;
+}
+
+.folder-row.active {
+  border-color: #5b8def;
+  box-shadow: 0 0 0 2px rgba(91, 141, 239, 0.2);
+}
+
+.folder-pick {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 0.45rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-dot {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+}
+
+.territory-card {
+  border: 1px solid #e4e9f1;
+  border-radius: 12px;
+  padding: 0.9rem;
+  margin-bottom: 0.85rem;
+  background: #ffffff;
+}
+
+.territory-card.active {
+  border-color: #5b8def;
+  box-shadow: 0 0 0 2px rgba(91, 141, 239, 0.18);
+}
+
+.territory-card h4 {
+  font-size: 1rem;
+}
+
+.territory-checklist {
+  border: 1px solid #eef2f8;
+  border-radius: 8px;
+  padding: 0.6rem;
+  background: #fafbfd;
+}
+
+.territory-check-item {
+  margin-bottom: 0.45rem;
+}
+
+.territory-check-item:last-child {
+  margin-bottom: 0;
+}
+
+.church-settings-shell {
+  max-width: 1180px;
+}
+
+.church-settings-top-tabs .card-body {
+  overflow-x: auto;
+}
+
+.church-settings-tabs {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
+.church-settings-tabs .nav-link {
+  border: 1px solid #e5eaf2;
+  border-radius: 9px;
+  color: #5f6b7a;
+  background: #ffffff;
+  font-size: 0.86rem;
+  padding: 0.4rem 0.65rem;
+}
+
+.church-settings-tabs .nav-link.active {
+  color: #4f46e5;
+  border-color: #d9d4ff;
+  background: #f2f0ff;
+}
+
+.church-settings-tabs .nav-link.disabled {
+  opacity: 0.72;
+}
+
+.church-settings-side .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.church-settings-link {
+  display: block;
+  border: 1px solid #e8edf5;
+  border-radius: 9px;
+  color: #4f5d70;
+  background: #ffffff;
+  padding: 0.45rem 0.6rem;
+  text-decoration: none;
+}
+
+.church-settings-link.active {
+  color: #4f46e5;
+  border-color: #d9d4ff;
+  background: #f2f0ff;
+}
+
+.church-settings-link:hover {
+  text-decoration: none;
+  color: #354457;
+  border-color: #cfd7e4;
+}
+
+.church-settings-side-note {
+  margin-top: 0.65rem;
+  border: 1px dashed #d3daea;
+  border-radius: 9px;
+  padding: 0.6rem;
+  color: #69788d;
+  font-size: 0.85rem;
+  background: #fbfcfe;
+}
+
+.church-settings-panel .card-header {
+  background: #fcfdff;
+}
+
 .sticky-card {
   position: sticky;
   top: 1rem;
@@ -40,5 +189,19 @@ body {
 @media (max-width: 992px) {
   .sticky-card {
     position: static;
+  }
+
+  #map {
+    min-height: 440px;
+  }
+}
+
+@media (max-width: 576px) {
+  #map {
+    min-height: 360px;
+  }
+
+  .territory-card {
+    padding: 0.75rem;
   }
 }

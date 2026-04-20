@@ -76,6 +76,14 @@
         <label class="form-label">ZIP</label>
         <input class="form-control" name="zipCode" value="<%= formData?.zipCode || '' %>" />
       </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Map Latitude</label>
+        <input class="form-control" name="mapLat" placeholder="-8.7619" value="<%= formData?.mapLat || '' %>" />
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label">Map Longitude</label>
+        <input class="form-control" name="mapLng" placeholder="-63.9039" value="<%= formData?.mapLng || '' %>" />
+      </div>
 
       <div class="col-12">
         <label class="form-label">Notes</label>

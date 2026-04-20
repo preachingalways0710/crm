@@ -1,0 +1,130 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<div class="church-settings-shell">
+  <div class="card mb-3 church-settings-top-tabs">
+    <div class="card-body p-2">
+      <div class="nav nav-pills church-settings-tabs">
+        <span class="nav-link active"><i class="bi bi-house me-1"></i>Church Details</span>
+        <span class="nav-link disabled"><i class="bi bi-credit-card me-1"></i>Subscription</span>
+        <span class="nav-link disabled"><i class="bi bi-wallet2 me-1"></i>Billing</span>
+        <span class="nav-link disabled"><i class="bi bi-plug me-1"></i>Integrations</span>
+        <span class="nav-link disabled"><i class="bi bi-sliders me-1"></i>Defaults</span>
+      </div>
+    </div>
+  </div>
+
+  <% if (saveStatus === 'saved') { %>
+    <div class="alert alert-success" role="alert">Church settings saved.</div>
+  <% } %>
+  <% if (geocodeStatus === 'success') { %>
+    <div class="alert alert-info" role="alert">Map coordinates were auto-filled from the church address.</div>
+  <% } %>
+  <% if (geocodeStatus === 'failed') { %>
+    <div class="alert alert-warning" role="alert">Could not auto-detect coordinates from address. Please set latitude and longitude manually.</div>
+  <% } %>
+  <% if (isReadOnly) { %>
+    <div class="alert alert-secondary" role="alert">Read-only view. Only admin users can edit church settings.</div>
+  <% } %>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-3">
+      <div class="card church-settings-side sticky-card">
+        <div class="card-body">
+          <p class="text-secondary text-uppercase fw-bold mb-2">Sections</p>
+          <a class="church-settings-link active" href="#church-details"><i class="bi bi-house-door me-2"></i>Church Details</a>
+          <a class="church-settings-link" href="#contact-details"><i class="bi bi-telephone me-2"></i>Contact Details</a>
+          <a class="church-settings-link" href="#map-defaults"><i class="bi bi-geo-alt me-2"></i>Map Defaults</a>
+          <div class="church-settings-side-note">
+            Visitation map is centered from this profile.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-9">
+      <form method="post" action="/settings/church" class="d-grid gap-3">
+        <fieldset <%= isReadOnly ? 'disabled' : '' %>>
+        <div class="card church-settings-panel" id="church-details">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h3 class="card-title mb-0">Church Details</h3>
+            <span class="text-secondary"><i class="bi <%= isReadOnly ? 'bi-eye' : 'bi-pencil' %> me-1"></i><%= isReadOnly ? 'View' : 'Edit' %></span>
+          </div>
+          <div class="card-body row g-2">
+            <div class="col-12 col-md-7">
+              <label class="form-label">Church Name</label>
+              <input class="form-control" name="name" value="<%= churchSettings.name || '' %>" placeholder="Igreja batista biblica do vale" />
+            </div>
+            <div class="col-12 col-md-5">
+              <label class="form-label">Email</label>
+              <input class="form-control" type="email" name="email" value="<%= churchSettings.email || '' %>" placeholder="church@example.com" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card church-settings-panel" id="contact-details">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h3 class="card-title mb-0">Contact Details</h3>
+            <span class="text-secondary"><i class="bi <%= isReadOnly ? 'bi-eye' : 'bi-pencil' %> me-1"></i><%= isReadOnly ? 'View' : 'Edit' %></span>
+          </div>
+          <div class="card-body row g-2">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Phone</label>
+              <input class="form-control" name="phone" value="<%= churchSettings.phone || '' %>" placeholder="+55 69 99999-9999" />
+            </div>
+            <div class="col-12 col-md-8">
+              <label class="form-label">Address</label>
+              <input class="form-control" name="address" value="<%= churchSettings.address || '' %>" placeholder="Street and number" />
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">City</label>
+              <input class="form-control" name="city" value="<%= churchSettings.city || '' %>" placeholder="Porto Velho" />
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">State</label>
+              <input class="form-control" name="state" value="<%= churchSettings.state || '' %>" placeholder="Rondonia" />
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label">ZIP Code</label>
+              <input class="form-control" name="zipCode" value="<%= churchSettings.zipCode || '' %>" placeholder="76800-000" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card church-settings-panel" id="map-defaults">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h3 class="card-title mb-0">Map Defaults</h3>
+            <span class="text-secondary"><i class="bi bi-compass me-1"></i>Used by Visitation</span>
+          </div>
+          <div class="card-body row g-2">
+            <div class="col-12 col-md-3">
+              <label class="form-label">Map Latitude</label>
+              <input class="form-control" name="mapLat" value="<%= churchSettings.mapLat || '' %>" placeholder="-8.7619" />
+            </div>
+            <div class="col-12 col-md-3">
+              <label class="form-label">Map Longitude</label>
+              <input class="form-control" name="mapLng" value="<%= churchSettings.mapLng || '' %>" placeholder="-63.9039" />
+            </div>
+            <div class="col-12 col-md-2">
+              <label class="form-label">Default Zoom</label>
+              <input class="form-control" name="mapCenterZoom" type="number" min="3" max="20" value="<%= mapCenterZoom || 13 %>" />
+            </div>
+            <div class="col-12 col-md-4 d-flex align-items-end">
+              <p class="text-secondary mb-0">If map coordinates are blank, the system auto-detects from address on save.</p>
+            </div>
+          </div>
+        </div>
+        </fieldset>
+
+        <div class="d-flex">
+          <% if (isReadOnly) { %>
+            <button class="btn btn-secondary" type="button" disabled>Admin Required To Save</button>
+          <% } else { %>
+            <button class="btn btn-primary" type="submit">Save Church Settings</button>
+          <% } %>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<%- include('partials-footer') %>

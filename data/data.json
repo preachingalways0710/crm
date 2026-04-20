@@ -2,12 +2,36 @@
   "people": [],
   "events": [],
   "attendanceRecords": [],
+  "folders": [],
   "sections": [],
   "visits": [],
   "followUps": [],
   "forms": [],
   "formSubmissions": [],
   "settings": {
-    "attendanceAppUrl": ""
+    "attendanceAppUrl": "",
+    "peopleSavedFilters": [],
+    "church": {
+      "name": "",
+      "email": "",
+      "phone": "",
+      "address": "",
+      "city": "",
+      "state": "",
+      "zipCode": "",
+      "mapLat": "",
+      "mapLng": ""
+    },
+    "visitation": {
+      "mapCenterMode": "church",
+      "mapCenterZoom": 13,
+      "profilePersonId": "",
+      "churchProfile": {
+        "name": "",
+        "address": "",
+        "lat": "",
+        "lng": ""
+      }
+    }
   }
 }

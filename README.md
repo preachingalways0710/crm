@@ -5,6 +5,7 @@ A focused, self-hosted church operations interface for:
 - People management (names, numbers, birthdays, notes)
 - Gracely-style person profile layout (tabs + cards + quick actions)
 - Follow-ups and visit logging per person
+- Household linking (spouse, parent, child relationships)
 - Global follow-up queue
 - CSV and Excel people import (XLS/XLSX export migration)
 - Membership type classification (Prospect, Member, Voting Member)
@@ -13,7 +14,9 @@ A focused, self-hosted church operations interface for:
 - Yearly calendar planning
 - Calendar birthday overlay toggle
 - Registration forms (starter level)
-- Visitation map sections (draw and track)
+- Church settings (contact + base map location)
+- Visitation territory board (folders, draw/claim/complete, checklist + mobile location claim)
+- Map base location configured from church settings (address or coordinates)
 
 ## Stack
 
@@ -25,7 +28,7 @@ A focused, self-hosted church operations interface for:
   - File fallback (`data/data.json`) when DB vars are not set
 - csv-parse + xlsx + multer (CSV/Excel import parser and upload)
 - FullCalendar (calendar UI)
-- Leaflet + Leaflet.draw (visitation map sections)
+- Leaflet + Leaflet.draw (visitation territory mapping)
 
 ## Local run
 
@@ -46,7 +49,9 @@ Open `http://localhost:3000`.
   - Compatibility aliases also accepted: `LEGACY_APP_PASSWORD`, `ATTENDANCE_APP_PASSWORD`, `ADMIN_PASSWORD`, `CRM_ADMIN_PASSWORD`
 - `APP_SECRET` (recommended): session secret for login cookies
 - `CRM_ADMIN_PASSWORD` (recommended): enables login protection for all CRM routes except `/register/*`
+  - Church Settings page is admin-only when auth is enabled
   - Compatibility aliases also accepted: `ADMIN_PASSWORD`, `APP_PASSWORD`, `PASSWORD`
+- `CRM_USER_PASSWORD` (optional): enables a non-admin login role (cannot access Church Settings)
 - `DB_HOST` (optional): MySQL host
 - `DB_PORT` (optional, default `3306`): MySQL port
 - `DB_NAME` (optional): MySQL database

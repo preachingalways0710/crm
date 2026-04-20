@@ -40,6 +40,9 @@
               <li class="nav-item <%= activeTab === 'calendar' ? 'active' : '' %>"><a class="nav-link" href="/calendar"><span class="nav-link-title">Calendar</span></a></li>
               <li class="nav-item <%= activeTab === 'forms' ? 'active' : '' %>"><a class="nav-link" href="/forms"><span class="nav-link-title">Forms</span></a></li>
               <li class="nav-item <%= activeTab === 'visitation' ? 'active' : '' %>"><a class="nav-link" href="/visitation"><span class="nav-link-title">Visitation</span></a></li>
+              <% if (isAdmin) { %>
+                <li class="nav-item <%= activeTab === 'church_settings' ? 'active' : '' %>"><a class="nav-link" href="/settings/church"><span class="nav-link-title">Church Settings</span></a></li>
+              <% } %>
               <li class="nav-item <%= activeTab === 'import' ? 'active' : '' %>"><a class="nav-link" href="/import"><span class="nav-link-title">Import</span></a></li>
             </ul>
           </div>

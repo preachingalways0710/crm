@@ -112,6 +112,109 @@ function normalizePhone(value) {
   return normalize(value).replace(/[^\d]/g, '');
 }
 
+function normalizeCoordinate(value, bounds = {}) {
+  const raw = normalize(value).replace(',', '.');
+  if (!raw) return '';
+
+  const parsed = Number.parseFloat(raw);
+  if (!Number.isFinite(parsed)) return '';
+
+  if (Number.isFinite(bounds.min) && parsed < bounds.min) return '';
+  if (Number.isFinite(bounds.max) && parsed > bounds.max) return '';
+
+  return Number.parseFloat(parsed.toFixed(6)).toString();
+}
+
+function normalizeLatitude(value) {
+  return normalizeCoordinate(value, { min: -90, max: 90 });
+}
+
+function normalizeLongitude(value) {
+  return normalizeCoordinate(value, { min: -180, max: 180 });
+}
+
+function normalizeMapZoom(value, fallback = 13) {
+  const parsed = Number.parseInt(normalize(value), 10);
+  if (!Number.isInteger(parsed)) return fallback;
+  return Math.min(20, Math.max(3, parsed));
+}
+
+function mapProfileSummary(person) {
+  const addressParts = [person.address, person.city, person.state, person.zipCode]
+    .map((part) => normalize(part))
+    .filter(Boolean);
+
+  return {
+    id: person.id,
+    name: normalize(person.name) || 'Unnamed profile',
+    lat: normalizeLatitude(person.mapLat),
+    lng: normalizeLongitude(person.mapLng),
+    address: addressParts.join(', ')
+  };
+}
+
+function hydrateChurchSettings(settings) {
+  const raw = settings && typeof settings === 'object' ? settings : {};
+
+  return {
+    name: normalize(raw.name),
+    email: normalize(raw.email),
+    phone: normalize(raw.phone),
+    address: normalize(raw.address),
+    city: normalize(raw.city),
+    state: normalize(raw.state),
+    zipCode: normalize(raw.zipCode),
+    mapLat: normalizeLatitude(raw.mapLat || raw.lat),
+    mapLng: normalizeLongitude(raw.mapLng || raw.lng)
+  };
+}
+
+function formatChurchAddress(churchSettings) {
+  return [
+    normalize(churchSettings?.address),
+    normalize(churchSettings?.city),
+    normalize(churchSettings?.state),
+    normalize(churchSettings?.zipCode)
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function mergeVisitationWithChurchSettings(mapSettings, churchSettings) {
+  const churchAddress = formatChurchAddress(churchSettings);
+
+  return {
+    ...mapSettings,
+    churchProfile: {
+      ...mapSettings.churchProfile,
+      name: mapSettings.churchProfile.name || churchSettings.name,
+      address: mapSettings.churchProfile.address || churchAddress,
+      lat: mapSettings.churchProfile.lat || churchSettings.mapLat,
+      lng: mapSettings.churchProfile.lng || churchSettings.mapLng
+    }
+  };
+}
+
+function hydrateVisitationSettings(settings, people = []) {
+  const raw = settings && typeof settings === 'object' ? settings : {};
+  const mode = normalize(raw.mapCenterMode) === 'profile' ? 'profile' : 'church';
+  const churchProfile = raw.churchProfile && typeof raw.churchProfile === 'object' ? raw.churchProfile : {};
+  const profilePersonId = normalize(raw.profilePersonId);
+  const peopleIds = new Set((people || []).map((entry) => entry.id));
+
+  return {
+    mapCenterMode: mode,
+    mapCenterZoom: normalizeMapZoom(raw.mapCenterZoom, 13),
+    profilePersonId: peopleIds.has(profilePersonId) ? profilePersonId : '',
+    churchProfile: {
+      name: normalize(churchProfile.name),
+      address: normalize(churchProfile.address),
+      lat: normalizeLatitude(churchProfile.lat),
+      lng: normalizeLongitude(churchProfile.lng)
+    }
+  };
+}
+
 function normalizeHeaderKey(value) {
   return normalize(value)
     .toLowerCase()
@@ -264,6 +367,46 @@ function normalizePersonTags(value) {
   return [];
 }
 
+function normalizePersonRelationIds(value) {
+  const list = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  const seen = new Set();
+  const ids = [];
+
+  list.forEach((entry) => {
+    const item = normalize(entry);
+    if (!item || seen.has(item)) return;
+    seen.add(item);
+    ids.push(item);
+  });
+
+  return ids;
+}
+
+function ensurePersonRelationships(person) {
+  person.spouseIds = normalizePersonRelationIds(person.spouseIds);
+  person.parentIds = normalizePersonRelationIds(person.parentIds);
+  person.childIds = normalizePersonRelationIds(person.childIds);
+  return person;
+}
+
+function hydratePersonRelationships(person) {
+  return ensurePersonRelationships({ ...(person || {}) });
+}
+
+function addUniqueId(list, personId) {
+  if (!personId || list.includes(personId)) return false;
+  list.push(personId);
+  return true;
+}
+
+function removeId(list, personId) {
+  const before = list.length;
+  const next = list.filter((entry) => entry !== personId);
+  if (next.length === before) return false;
+  list.splice(0, list.length, ...next);
+  return true;
+}
+
 function normalizeFollowupsFilter(value) {
   return normalize(value) === 'open' ? 'open' : 'all';
 }
@@ -355,6 +498,56 @@ async function fetchWithTimeout(url, options = {}) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function geocodeAddress(address) {
+  const query = normalize(address);
+  if (!query) return null;
+
+  const endpoints = [
+    'https://nominatim.openstreetmap.org/search',
+    'http://nominatim.openstreetmap.org/search'
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const url = new URL(endpoint);
+      url.searchParams.set('q', query);
+      url.searchParams.set('format', 'json');
+      url.searchParams.set('limit', '1');
+
+      const response = await fetchWithTimeout(url.toString(), {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'ChurchCRM/1.0 (Visitation Map Base)'
+        }
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const rows = await response.json();
+      if (!Array.isArray(rows) || rows.length === 0) {
+        continue;
+      }
+
+      const first = rows[0] || {};
+      const lat = normalizeLatitude(first.lat);
+      const lng = normalizeLongitude(first.lon);
+
+      if (!lat || !lng) {
+        continue;
+      }
+
+      return { lat, lng };
+    } catch {
+      // Try the next endpoint.
+    }
+  }
+
+  return null;
 }
 
 function parsePessoasServiceType(value) {
@@ -587,6 +780,115 @@ const serviceTypeLabels = {
   sun_am: 'Sunday AM',
   sun_pm: 'Sunday PM'
 };
+const familyRelationshipTypes = ['spouse', 'parent', 'child'];
+
+function normalizeFamilyRelationshipType(value) {
+  const type = normalize(value);
+  return familyRelationshipTypes.includes(type) ? type : '';
+}
+
+function linkPeopleRelationship(people, sourceId, relationship, targetId) {
+  const type = normalizeFamilyRelationshipType(relationship);
+  if (!type || sourceId === targetId) return false;
+
+  const source = people.find((entry) => entry.id === sourceId);
+  const target = people.find((entry) => entry.id === targetId);
+  if (!source || !target) return false;
+
+  ensurePersonRelationships(source);
+  ensurePersonRelationships(target);
+
+  let changed = false;
+  if (type === 'spouse') {
+    changed = addUniqueId(source.spouseIds, targetId) || changed;
+    changed = addUniqueId(target.spouseIds, sourceId) || changed;
+  }
+
+  if (type === 'parent') {
+    changed = addUniqueId(source.parentIds, targetId) || changed;
+    changed = addUniqueId(target.childIds, sourceId) || changed;
+    changed = removeId(source.childIds, targetId) || changed;
+    changed = removeId(target.parentIds, sourceId) || changed;
+  }
+
+  if (type === 'child') {
+    changed = addUniqueId(source.childIds, targetId) || changed;
+    changed = addUniqueId(target.parentIds, sourceId) || changed;
+    changed = removeId(source.parentIds, targetId) || changed;
+    changed = removeId(target.childIds, sourceId) || changed;
+  }
+
+  if (changed) {
+    const nowIso = new Date().toISOString();
+    source.updatedAt = nowIso;
+    target.updatedAt = nowIso;
+  }
+
+  return changed;
+}
+
+function unlinkPeopleRelationship(people, sourceId, relationship, targetId) {
+  const type = normalizeFamilyRelationshipType(relationship);
+  if (!type || sourceId === targetId) return false;
+
+  const source = people.find((entry) => entry.id === sourceId);
+  const target = people.find((entry) => entry.id === targetId);
+  if (!source || !target) return false;
+
+  ensurePersonRelationships(source);
+  ensurePersonRelationships(target);
+
+  let changed = false;
+  if (type === 'spouse') {
+    changed = removeId(source.spouseIds, targetId) || changed;
+    changed = removeId(target.spouseIds, sourceId) || changed;
+  }
+
+  if (type === 'parent') {
+    changed = removeId(source.parentIds, targetId) || changed;
+    changed = removeId(target.childIds, sourceId) || changed;
+  }
+
+  if (type === 'child') {
+    changed = removeId(source.childIds, targetId) || changed;
+    changed = removeId(target.parentIds, sourceId) || changed;
+  }
+
+  if (changed) {
+    const nowIso = new Date().toISOString();
+    source.updatedAt = nowIso;
+    target.updatedAt = nowIso;
+  }
+
+  return changed;
+}
+
+function removePersonFromRelationships(people, personId) {
+  let changed = false;
+
+  people.forEach((person) => {
+    ensurePersonRelationships(person);
+    let personChanged = false;
+    personChanged = removeId(person.spouseIds, personId) || personChanged;
+    personChanged = removeId(person.parentIds, personId) || personChanged;
+    personChanged = removeId(person.childIds, personId) || personChanged;
+
+    if (personChanged) {
+      person.updatedAt = new Date().toISOString();
+    }
+
+    changed = personChanged || changed;
+  });
+
+  return changed;
+}
+
+function resolveRelationshipPeople(person, field, peopleById) {
+  return normalizePersonRelationIds(person[field])
+    .map((personId) => peopleById[personId])
+    .filter(Boolean)
+    .sort((a, b) => normalize(a.name).localeCompare(normalize(b.name)));
+}
 
 function normalizeFollowUpStage(value) {
   const stage = normalize(value);
@@ -687,10 +989,10 @@ app.locals.followUpStages = followUpStages;
 app.locals.followUpStageLabels = followUpStageLabels;
 
 function isAuthEnabled() {
-  return Boolean(getAuthPassword());
+  return Boolean(getAdminAuthPassword() || getUserAuthPassword());
 }
 
-function getAuthPassword() {
+function getAdminAuthPassword() {
   const candidates = [
     process.env.CRM_ADMIN_PASSWORD,
     process.env.ADMIN_PASSWORD,
@@ -704,14 +1006,56 @@ function getAuthPassword() {
   return normalize(first);
 }
 
+function getUserAuthPassword() {
+  return normalize(process.env.CRM_USER_PASSWORD);
+}
+
 function authPasswordSource() {
-  if (normalize(process.env.CRM_ADMIN_PASSWORD)) return 'CRM_ADMIN_PASSWORD';
-  if (normalize(process.env.ADMIN_PASSWORD)) return 'ADMIN_PASSWORD';
-  if (normalize(process.env.APP_PASSWORD)) return 'APP_PASSWORD';
-  if (normalize(process.env.PASSWORD)) return 'PASSWORD';
-  if (normalize(process.env.admin_password)) return 'admin_password';
-  if (normalize(process.env.password)) return 'password';
+  const sources = [];
+  if (normalize(process.env.CRM_ADMIN_PASSWORD)) sources.push('CRM_ADMIN_PASSWORD');
+  else if (normalize(process.env.ADMIN_PASSWORD)) sources.push('ADMIN_PASSWORD');
+  else if (normalize(process.env.APP_PASSWORD)) sources.push('APP_PASSWORD');
+  else if (normalize(process.env.PASSWORD)) sources.push('PASSWORD');
+  else if (normalize(process.env.admin_password)) sources.push('admin_password');
+  else if (normalize(process.env.password)) sources.push('password');
+
+  if (normalize(process.env.CRM_USER_PASSWORD)) sources.push('CRM_USER_PASSWORD');
+  return sources.join('+');
+}
+
+function resolveLoginRole(submittedPassword) {
+  const adminPassword = getAdminAuthPassword();
+  if (adminPassword && safePasswordCompare(submittedPassword, adminPassword)) {
+    return 'admin';
+  }
+
+  const userPassword = getUserAuthPassword();
+  if (userPassword && safePasswordCompare(submittedPassword, userPassword)) {
+    return 'user';
+  }
+
   return '';
+}
+
+function isSessionAdmin(req) {
+  if (!isAuthEnabled()) {
+    return true;
+  }
+
+  if (req.session?.isAdmin) {
+    return true;
+  }
+
+  // Backward compatibility: when only one password exists, authenticated users are admins.
+  return Boolean(req.session?.isAuthenticated) && !getUserAuthPassword();
+}
+
+function requireAdmin(req, res, next) {
+  if (isSessionAdmin(req)) {
+    return next();
+  }
+
+  return res.status(403).send('Admin access required.');
 }
 
 function safePasswordCompare(input, expected) {
@@ -733,6 +1077,7 @@ function isPublicPath(pathname) {
 app.use((req, res, next) => {
   res.locals.authEnabled = isAuthEnabled();
   res.locals.isAuthenticated = Boolean(req.session?.isAuthenticated);
+  res.locals.isAdmin = isSessionAdmin(req);
   next();
 });
 
@@ -845,6 +1190,9 @@ async function importPeopleRows(rows) {
         createdAt: row.createdAt || '',
         baptismDate: row.baptismDate || '',
         totalContribution: row.totalContribution || '',
+        spouseIds: [],
+        parentIds: [],
+        childIds: [],
         updatedAt: new Date().toISOString()
       });
     });
@@ -880,10 +1228,10 @@ app.post('/login', (req, res) => {
   }
 
   const submitted = normalize(req.body.password);
-  const expected = getAuthPassword();
   const returnTo = normalize(req.body.returnTo) || '/people';
+  const role = resolveLoginRole(submitted);
 
-  if (!safePasswordCompare(submitted, expected)) {
+  if (!role) {
     return res.status(401).render('login', {
       returnTo,
       error: 'Invalid password'
@@ -891,6 +1239,8 @@ app.post('/login', (req, res) => {
   }
 
   req.session.isAuthenticated = true;
+  req.session.role = role;
+  req.session.isAdmin = role === 'admin';
   return res.redirect(returnTo);
 });
 
@@ -899,7 +1249,9 @@ app.get('/auth-status', (req, res) => {
     authEnabled: isAuthEnabled(),
     authPasswordSource: authPasswordSource() || null,
     hasAppSecret: Boolean(normalize(process.env.APP_SECRET)),
-    isAuthenticated: Boolean(req.session?.isAuthenticated)
+    isAuthenticated: Boolean(req.session?.isAuthenticated),
+    role: req.session?.role || '',
+    isAdmin: isSessionAdmin(req)
   });
 });
 
@@ -907,6 +1259,90 @@ app.post('/logout', (req, res) => {
   req.session.destroy(() => {
     res.redirect('/login');
   });
+});
+
+app.get('/settings/church', async (req, res, next) => {
+  try {
+    const data = await readData();
+    const churchSettings = hydrateChurchSettings((data.settings || {}).church);
+    const visitationSettings = hydrateVisitationSettings((data.settings || {}).visitation, data.people || []);
+    const saveStatus = normalize(req.query.saved) === '1' ? 'saved' : '';
+    const geocodeStatus = normalize(req.query.geocode);
+    const isReadOnly = !isSessionAdmin(req);
+
+    res.render('church-settings', {
+      activeTab: 'church_settings',
+      churchSettings,
+      mapCenterZoom: visitationSettings.mapCenterZoom || 13,
+      saveStatus,
+      geocodeStatus,
+      isReadOnly
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/settings/church', requireAdmin, async (req, res, next) => {
+  try {
+    const churchSettings = hydrateChurchSettings({
+      name: req.body.name,
+      email: req.body.email,
+      phone: req.body.phone,
+      address: req.body.address,
+      city: req.body.city,
+      state: req.body.state,
+      zipCode: req.body.zipCode,
+      mapLat: req.body.mapLat,
+      mapLng: req.body.mapLng
+    });
+
+    const mapCenterZoom = normalizeMapZoom(req.body.mapCenterZoom, 13);
+    const shouldGeocode = !churchSettings.mapLat || !churchSettings.mapLng;
+    const geocodeQuery = formatChurchAddress(churchSettings);
+    let geocodeStatus = 'none';
+
+    if (shouldGeocode && geocodeQuery) {
+      const geocoded = await geocodeAddress(geocodeQuery);
+      if (geocoded) {
+        churchSettings.mapLat = geocoded.lat;
+        churchSettings.mapLng = geocoded.lng;
+        geocodeStatus = 'success';
+      } else {
+        geocodeStatus = 'failed';
+      }
+    }
+
+    await updateData((data) => {
+      data.settings = data.settings || {};
+      data.settings.church = churchSettings;
+
+      const currentVisitation = hydrateVisitationSettings((data.settings || {}).visitation, data.people || []);
+      data.settings.visitation = {
+        ...currentVisitation,
+        mapCenterMode: 'church',
+        mapCenterZoom,
+        profilePersonId: '',
+        churchProfile: {
+          name: churchSettings.name,
+          address: geocodeQuery,
+          lat: churchSettings.mapLat,
+          lng: churchSettings.mapLng
+        }
+      };
+
+      return data;
+    });
+
+    const params = new URLSearchParams({
+      saved: '1',
+      ...(geocodeStatus !== 'none' ? { geocode: geocodeStatus } : {})
+    });
+
+    return res.redirect(`/settings/church?${params.toString()}`);
+  } catch (err) {
+    return next(err);
+  }
 });
 
 app.get('/', (req, res) => {
@@ -1049,6 +1485,8 @@ app.get('/people/new', async (req, res, next) => {
         city: normalize(req.query.city),
         state: normalize(req.query.state),
         zipCode: normalize(req.query.zipCode),
+        mapLat: normalize(req.query.mapLat),
+        mapLng: normalize(req.query.mapLng),
         notes: normalize(req.query.notes)
       }
     });
@@ -1127,18 +1565,38 @@ app.get('/people/:id', async (req, res, next) => {
       .filter((entry) => entry.personId === person.id)
       .sort((a, b) => new Date(b.date) - new Date(a.date));
 
+    const peopleById = data.people.reduce((acc, entry) => {
+      acc[entry.id] = entry;
+      return acc;
+    }, {});
+    const personWithRelationships = hydratePersonRelationships(person);
+    const household = {
+      spouses: resolveRelationshipPeople(personWithRelationships, 'spouseIds', peopleById),
+      parents: resolveRelationshipPeople(personWithRelationships, 'parentIds', peopleById),
+      children: resolveRelationshipPeople(personWithRelationships, 'childIds', peopleById)
+    };
+    const relationshipCandidates = sortByName(data.people)
+      .filter((entry) => entry.id !== person.id)
+      .map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        membershipType: entry.membershipType || 'Prospect'
+      }));
+
     const timeline = buildPersonTimeline(person, followUps, visits);
 
     res.render('people-profile', {
       activeTab: 'people',
       person: {
-        ...enrichPerson(person),
+        ...enrichPerson(personWithRelationships),
         tags: normalizePersonTags(person.tags)
       },
       tab: currentTab,
       followUps,
       visits,
       timeline,
+      household,
+      relationshipCandidates,
       followUpOpenCount: followUps.filter((entry) => entry.status !== 'completed').length
     });
   } catch (err) {
@@ -1170,7 +1628,12 @@ app.post('/people', async (req, res, next) => {
       city: req.body.city || '',
       state: req.body.state || '',
       zipCode: req.body.zipCode || '',
+      mapLat: normalizeLatitude(req.body.mapLat),
+      mapLng: normalizeLongitude(req.body.mapLng),
       tags: parseTagsInput(req.body.tags),
+      spouseIds: [],
+      parentIds: [],
+      childIds: [],
       createdAt: nowIso,
       updatedAt: nowIso
     };
@@ -1222,6 +1685,8 @@ app.post('/people', async (req, res, next) => {
         city: person.city,
         state: person.state,
         zipCode: person.zipCode,
+        mapLat: person.mapLat,
+        mapLng: person.mapLng,
         notes: person.notes
       });
       return res.redirect(`/people/new?${params.toString()}`);
@@ -1267,6 +1732,8 @@ app.post('/people/:id', async (req, res, next) => {
         write('city', (value) => value || '');
         write('state', (value) => value || '');
         write('zipCode', (value) => value || '');
+        write('mapLat', (value) => normalizeLatitude(value));
+        write('mapLng', (value) => normalizeLongitude(value));
         write('tags', (value) => parseTagsInput(value));
         person.updatedAt = new Date().toISOString();
       }
@@ -1280,10 +1747,56 @@ app.post('/people/:id', async (req, res, next) => {
   }
 });
 
+app.post('/people/:id/relationships', async (req, res, next) => {
+  try {
+    const fallback = `/people/${req.params.id}?tab=profile`;
+    const returnTo = normalize(req.body.returnTo);
+    const destination = returnTo.startsWith('/') ? returnTo : fallback;
+    const relationship = normalizeFamilyRelationshipType(req.body.relationship);
+    const targetId = normalize(req.body.targetId);
+
+    if (!relationship || !targetId) {
+      return res.redirect(destination);
+    }
+
+    await updateData((data) => {
+      linkPeopleRelationship(data.people, req.params.id, relationship, targetId);
+      return data;
+    });
+
+    return res.redirect(destination);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/people/:id/relationships/:relationship/:targetId/delete', async (req, res, next) => {
+  try {
+    const fallback = `/people/${req.params.id}?tab=profile`;
+    const returnTo = normalize(req.body.returnTo);
+    const destination = returnTo.startsWith('/') ? returnTo : fallback;
+    const relationship = normalizeFamilyRelationshipType(req.params.relationship);
+
+    if (!relationship) {
+      return res.redirect(destination);
+    }
+
+    await updateData((data) => {
+      unlinkPeopleRelationship(data.people, req.params.id, relationship, req.params.targetId);
+      return data;
+    });
+
+    return res.redirect(destination);
+  } catch (err) {
+    return next(err);
+  }
+});
+
 app.post('/people/:id/delete', async (req, res, next) => {
   try {
     await updateData((data) => {
       data.people = data.people.filter((entry) => entry.id !== req.params.id);
+      removePersonFromRelationships(data.people, req.params.id);
       data.followUps = data.followUps.filter((entry) => entry.personId !== req.params.id);
       data.visits = data.visits.filter((entry) => entry.personId !== req.params.id);
       return data;
@@ -2245,14 +2758,280 @@ app.post('/import/people/file', upload.single('peopleFile'), async (req, res, ne
   }
 });
 
+const sectionStatusValues = new Set(['unclaimed', 'claimed', 'completed']);
+const defaultSectionColor = '#0c4a6e';
+const defaultFolderColor = '#20c997';
+
+function normalizeSectionStatus(value) {
+  const next = normalize(value).toLowerCase();
+  return sectionStatusValues.has(next) ? next : 'unclaimed';
+}
+
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    return value.toLowerCase() === 'true';
+  }
+  return false;
+}
+
+function normalizeChecklist(checklist, sectionId = 'section') {
+  if (!Array.isArray(checklist)) {
+    return [];
+  }
+
+  return checklist
+    .map((item, index) => {
+      if (typeof item === 'string') {
+        const label = normalize(item);
+        if (!label) return null;
+        return {
+          id: `${sectionId}-item-${index + 1}`,
+          label,
+          done: false,
+          completedAt: ''
+        };
+      }
+
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const label = normalize(item.label || item.name || item.text);
+      if (!label) {
+        return null;
+      }
+
+      const done = parseBoolean(item.done);
+      return {
+        id: normalize(item.id) || `${sectionId}-item-${index + 1}`,
+        label,
+        done,
+        completedAt: done ? normalize(item.completedAt) : ''
+      };
+    })
+    .filter(Boolean);
+}
+
+function hydrateFolder(folder, index = 0) {
+  const folderId = normalize(folder?.id) || `folder-${index + 1}`;
+
+  return {
+    id: folderId,
+    name: normalize(folder?.name) || `Folder ${index + 1}`,
+    color: normalize(folder?.color) || defaultFolderColor,
+    notes: normalize(folder?.notes)
+  };
+}
+
+function hydrateSection(section, index = 0) {
+  const sectionId = normalize(section?.id) || `section-${index + 1}`;
+  const status = normalizeSectionStatus(section?.status);
+
+  return {
+    id: sectionId,
+    name: normalize(section?.name),
+    folderId: normalize(section?.folderId),
+    color: normalize(section?.color) || defaultSectionColor,
+    lastVisited: toIsoDate(section?.lastVisited),
+    notes: normalize(section?.notes),
+    geojson: section?.geojson || null,
+    status,
+    claimedBy: status === 'unclaimed' ? '' : normalize(section?.claimedBy),
+    claimedAt: status === 'unclaimed' ? '' : normalize(section?.claimedAt),
+    completedAt: status === 'completed' ? normalize(section?.completedAt) : '',
+    checklist: normalizeChecklist(section?.checklist, sectionId)
+  };
+}
+
 app.get('/visitation', async (req, res, next) => {
   try {
     const data = await readData();
+    const people = Array.isArray(data.people) ? data.people : [];
+    const mapProfiles = sortByName(people).map((entry) => mapProfileSummary(entry));
+    const churchSettings = hydrateChurchSettings((data.settings || {}).church);
+    const mapSettings = mergeVisitationWithChurchSettings(
+      hydrateVisitationSettings((data.settings || {}).visitation, people),
+      churchSettings
+    );
 
     res.render('visitation', {
       activeTab: 'visitation',
-      sections: data.sections
+      sections: (data.sections || []).map((entry, index) => hydrateSection(entry, index)),
+      folders: (data.folders || []).map((entry, index) => hydrateFolder(entry, index)),
+      mapProfiles,
+      mapSettings
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/visitation/settings', async (req, res, next) => {
+  try {
+    const data = await readData();
+    const people = Array.isArray(data.people) ? data.people : [];
+    const mapProfiles = sortByName(people).map((entry) => mapProfileSummary(entry));
+    const churchSettings = hydrateChurchSettings((data.settings || {}).church);
+    const mapSettings = mergeVisitationWithChurchSettings(
+      hydrateVisitationSettings((data.settings || {}).visitation, people),
+      churchSettings
+    );
+
+    res.json({ mapSettings, mapProfiles });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/visitation/settings', async (req, res, next) => {
+  try {
+    const current = await readData();
+    const people = Array.isArray(current.people) ? current.people : [];
+    const mapProfiles = sortByName(people).map((entry) => mapProfileSummary(entry));
+    const mapProfilesById = mapProfiles.reduce((acc, entry) => {
+      acc[entry.id] = entry;
+      return acc;
+    }, {});
+    const incomingChurchProfile =
+      req.body.churchProfile && typeof req.body.churchProfile === 'object'
+        ? req.body.churchProfile
+        : {};
+
+    const churchSettings = hydrateChurchSettings((current.settings || {}).church);
+    let mapSettings = mergeVisitationWithChurchSettings(
+      hydrateVisitationSettings(
+        {
+          mapCenterMode: req.body.mapCenterMode,
+          mapCenterZoom: req.body.mapCenterZoom,
+          profilePersonId: req.body.profilePersonId,
+          churchProfile: {
+            name: req.body.churchName || incomingChurchProfile.name,
+            address: req.body.churchAddress || incomingChurchProfile.address,
+            lat: req.body.churchLat || incomingChurchProfile.lat,
+            lng: req.body.churchLng || incomingChurchProfile.lng
+          }
+        },
+        people
+      ),
+      churchSettings
+    );
+
+    if (mapSettings.mapCenterMode === 'church') {
+      const hasChurchCoordinates = Boolean(
+        mapSettings.churchProfile.lat && mapSettings.churchProfile.lng
+      );
+
+      if (!hasChurchCoordinates && mapSettings.churchProfile.address) {
+        const geocoded = await geocodeAddress(mapSettings.churchProfile.address);
+        if (geocoded) {
+          mapSettings = {
+            ...mapSettings,
+            churchProfile: {
+              ...mapSettings.churchProfile,
+              lat: geocoded.lat,
+              lng: geocoded.lng
+            }
+          };
+        }
+      }
+
+      if (!mapSettings.churchProfile.lat || !mapSettings.churchProfile.lng) {
+        return res.status(400).json({
+          error: 'Set church address (or church lat/lng) so map base can be located.'
+        });
+      }
+    }
+
+    if (mapSettings.mapCenterMode === 'profile') {
+      if (!mapSettings.profilePersonId) {
+        return res.status(400).json({ error: 'Choose a profile person for profile-based map center.' });
+      }
+
+      const profile = mapProfilesById[mapSettings.profilePersonId];
+      if (!profile || !profile.lat || !profile.lng) {
+        return res.status(400).json({ error: 'Selected profile needs valid latitude and longitude.' });
+      }
+    }
+
+    await updateData((data) => {
+      data.settings = data.settings || {};
+      data.settings.visitation = mapSettings;
+      return data;
+    });
+
+    res.json({
+      ok: true,
+      mapSettings,
+      mapProfiles
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/folders', async (req, res, next) => {
+  try {
+    const data = await readData();
+    res.json((data.folders || []).map((entry, index) => hydrateFolder(entry, index)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/folders', async (req, res, next) => {
+  try {
+    const payload = {
+      id: normalize(req.body.id) || id(),
+      name: normalize(req.body.name),
+      color: normalize(req.body.color) || defaultFolderColor,
+      notes: normalize(req.body.notes)
+    };
+
+    if (!payload.name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    await updateData((data) => {
+      data.folders = Array.isArray(data.folders) ? data.folders : [];
+      const idx = data.folders.findIndex((entry) => normalize(entry.id) === payload.id);
+
+      if (idx === -1) {
+        data.folders.push(payload);
+      } else {
+        data.folders[idx] = payload;
+      }
+
+      return data;
+    });
+
+    res.json({ ok: true, folder: payload });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete('/api/folders/:id', async (req, res, next) => {
+  try {
+    const folderId = normalize(req.params.id);
+
+    await updateData((data) => {
+      data.folders = (data.folders || []).filter((entry) => normalize(entry.id) !== folderId);
+      data.sections = (data.sections || []).map((section) => {
+        if (normalize(section.folderId) !== folderId) {
+          return section;
+        }
+
+        return {
+          ...section,
+          folderId: ''
+        };
+      });
+      return data;
+    });
+
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
@@ -2261,7 +3040,7 @@ app.get('/visitation', async (req, res, next) => {
 app.get('/api/sections', async (req, res, next) => {
   try {
     const data = await readData();
-    res.json(data.sections);
+    res.json((data.sections || []).map((entry, index) => hydrateSection(entry, index)));
   } catch (err) {
     next(err);
   }
@@ -2269,21 +3048,67 @@ app.get('/api/sections', async (req, res, next) => {
 
 app.post('/api/sections', async (req, res, next) => {
   try {
+    const sectionId = normalize(req.body.id) || id();
+    const status = normalizeSectionStatus(req.body.status);
+    const nowIso = new Date().toISOString();
+    let claimedBy = normalize(req.body.claimedBy);
+    let claimedAt = normalize(req.body.claimedAt);
+    let completedAt = normalize(req.body.completedAt);
+
+    if (status === 'unclaimed') {
+      claimedBy = '';
+      claimedAt = '';
+      completedAt = '';
+    } else if (status === 'claimed') {
+      completedAt = '';
+      if (claimedBy && !claimedAt) {
+        claimedAt = nowIso;
+      }
+    } else if (status === 'completed') {
+      if (claimedBy && !claimedAt) {
+        claimedAt = nowIso;
+      }
+      if (!completedAt) {
+        completedAt = nowIso;
+      }
+    }
+
     const payload = {
-      id: req.body.id || id(),
-      name: req.body.name?.trim() || '',
-      color: req.body.color || '#0c4a6e',
-      lastVisited: req.body.lastVisited || '',
-      notes: req.body.notes?.trim() || '',
-      geojson: req.body.geojson || null
+      id: sectionId,
+      name: normalize(req.body.name),
+      folderId: normalize(req.body.folderId),
+      color: normalize(req.body.color) || defaultSectionColor,
+      lastVisited: toIsoDate(req.body.lastVisited),
+      notes: normalize(req.body.notes),
+      geojson: req.body.geojson || null,
+      status,
+      claimedBy,
+      claimedAt,
+      completedAt,
+      checklist: normalizeChecklist(req.body.checklist, sectionId).map((item) => ({
+        ...item,
+        completedAt: item.done ? item.completedAt || nowIso : ''
+      }))
     };
 
     if (!payload.name || !payload.geojson) {
       return res.status(400).json({ error: 'name and geojson are required' });
     }
 
+    if (payload.folderId) {
+      const current = await readData();
+      const folderExists = (current.folders || []).some(
+        (entry) => normalize(entry.id) === payload.folderId
+      );
+
+      if (!folderExists) {
+        return res.status(400).json({ error: 'folderId is invalid' });
+      }
+    }
+
     await updateData((data) => {
-      const idx = data.sections.findIndex((entry) => entry.id === payload.id);
+      data.sections = Array.isArray(data.sections) ? data.sections : [];
+      const idx = data.sections.findIndex((entry) => normalize(entry.id) === payload.id);
       if (idx === -1) {
         data.sections.push(payload);
       } else {
@@ -2298,10 +3123,200 @@ app.post('/api/sections', async (req, res, next) => {
   }
 });
 
+app.post('/api/sections/:id/claim', async (req, res, next) => {
+  try {
+    const sectionId = normalize(req.params.id);
+    const claimedBy = normalize(req.body.claimedBy);
+    const nowIso = new Date().toISOString();
+    let updated = null;
+
+    if (!claimedBy) {
+      return res.status(400).json({ error: 'claimedBy is required' });
+    }
+
+    await updateData((data) => {
+      data.sections = Array.isArray(data.sections) ? data.sections : [];
+      const idx = data.sections.findIndex((entry) => normalize(entry.id) === sectionId);
+
+      if (idx === -1) {
+        return data;
+      }
+
+      const section = hydrateSection(data.sections[idx], idx);
+      updated = {
+        ...section,
+        status: 'claimed',
+        claimedBy,
+        claimedAt: nowIso,
+        completedAt: ''
+      };
+      data.sections[idx] = updated;
+      return data;
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'section not found' });
+    }
+
+    res.json({ ok: true, section: hydrateSection(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/sections/:id/unclaim', async (req, res, next) => {
+  try {
+    const sectionId = normalize(req.params.id);
+    let updated = null;
+
+    await updateData((data) => {
+      data.sections = Array.isArray(data.sections) ? data.sections : [];
+      const idx = data.sections.findIndex((entry) => normalize(entry.id) === sectionId);
+
+      if (idx === -1) {
+        return data;
+      }
+
+      const section = hydrateSection(data.sections[idx], idx);
+      updated = {
+        ...section,
+        status: 'unclaimed',
+        claimedBy: '',
+        claimedAt: '',
+        completedAt: ''
+      };
+      data.sections[idx] = updated;
+      return data;
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'section not found' });
+    }
+
+    res.json({ ok: true, section: hydrateSection(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/sections/:id/complete', async (req, res, next) => {
+  try {
+    const sectionId = normalize(req.params.id);
+    const workerName = normalize(req.body.claimedBy);
+    const nowIso = new Date().toISOString();
+    let updated = null;
+
+    await updateData((data) => {
+      data.sections = Array.isArray(data.sections) ? data.sections : [];
+      const idx = data.sections.findIndex((entry) => normalize(entry.id) === sectionId);
+
+      if (idx === -1) {
+        return data;
+      }
+
+      const section = hydrateSection(data.sections[idx], idx);
+      const claimedBy = workerName || section.claimedBy;
+      updated = {
+        ...section,
+        status: 'completed',
+        claimedBy,
+        claimedAt: section.claimedAt || (claimedBy ? nowIso : ''),
+        completedAt: nowIso,
+        lastVisited: section.lastVisited || nowIso.slice(0, 10)
+      };
+      data.sections[idx] = updated;
+      return data;
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'section not found' });
+    }
+
+    res.json({ ok: true, section: hydrateSection(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/sections/:id/checklist', async (req, res, next) => {
+  try {
+    const sectionId = normalize(req.params.id);
+    const itemId = normalize(req.body.itemId);
+    const nowIso = new Date().toISOString();
+    let updated = null;
+    let itemFound = false;
+    let sectionExists = false;
+
+    if (!Array.isArray(req.body.items) && !itemId) {
+      return res.status(400).json({ error: 'itemId or items[] is required' });
+    }
+
+    await updateData((data) => {
+      data.sections = Array.isArray(data.sections) ? data.sections : [];
+      const idx = data.sections.findIndex((entry) => normalize(entry.id) === sectionId);
+
+      if (idx === -1) {
+        return data;
+      }
+
+      sectionExists = true;
+
+      const section = hydrateSection(data.sections[idx], idx);
+      let checklist = normalizeChecklist(section.checklist, section.id);
+
+      if (Array.isArray(req.body.items)) {
+        checklist = normalizeChecklist(req.body.items, section.id).map((entry) => ({
+          ...entry,
+          completedAt: entry.done ? entry.completedAt || nowIso : ''
+        }));
+        itemFound = true;
+      } else {
+        checklist = checklist.map((entry) => {
+          if (entry.id !== itemId) {
+            return entry;
+          }
+
+          itemFound = true;
+          const done = parseBoolean(req.body.done);
+          return {
+            ...entry,
+            done,
+            completedAt: done ? entry.completedAt || nowIso : ''
+          };
+        });
+      }
+
+      if (!itemFound) {
+        return data;
+      }
+
+      updated = {
+        ...section,
+        checklist
+      };
+      data.sections[idx] = updated;
+      return data;
+    });
+
+    if (!sectionExists) {
+      return res.status(404).json({ error: 'section not found' });
+    }
+
+    if (!itemFound) {
+      return res.status(400).json({ error: 'checklist item not found' });
+    }
+
+    res.json({ ok: true, section: hydrateSection(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.delete('/api/sections/:id', async (req, res, next) => {
   try {
+    const sectionId = normalize(req.params.id);
     await updateData((data) => {
-      data.sections = data.sections.filter((entry) => entry.id !== req.params.id);
+      data.sections = (data.sections || []).filter((entry) => normalize(entry.id) !== sectionId);
       return data;
     });
 
