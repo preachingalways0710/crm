@@ -2,8 +2,8 @@ let map;
 let drawnItems;
 let savedSectionsLayer;
 let activeLayer = null;
-let locationMarker = null;
 let didFitBounds = false;
+let draftStreetCounter = 0;
 
 const boot = window.__VISITATION_BOOTSTRAP__ || { sections: [], folders: [], mapSettings: {}, mapProfiles: [] };
 const state = {
@@ -14,7 +14,8 @@ const state = {
   selectedFolderId: '',
   selectedSectionId: '',
   mode: 'map',
-  currentLocation: null,
+  drawingTarget: 'section',
+  draftStreets: [],
   hasConfiguredMapBase: false
 };
 
@@ -50,13 +51,25 @@ function safeText(value) {
   return (value || '').toString();
 }
 
+function normalizeStreet(street, index = 0, sectionId = 'section') {
+  return {
+    id: safeText(street?.id) || `${sectionId}-street-${index + 1}`,
+    name: safeText(street?.name) || `Street ${index + 1}`,
+    color: safeText(street?.color) || '#16a34a',
+    done: Boolean(street?.done),
+    completedAt: street?.done ? safeText(street?.completedAt) : '',
+    geojson: street?.geojson || null
+  };
+}
+
 function normalizeSection(section) {
   const status = ['unclaimed', 'claimed', 'completed'].includes(section?.status)
     ? section.status
     : 'unclaimed';
+  const sectionId = safeText(section?.id);
 
   return {
-    id: safeText(section?.id),
+    id: sectionId,
     name: safeText(section?.name),
     folderId: safeText(section?.folderId),
     color: safeText(section?.color) || '#0c4a6e',
@@ -81,6 +94,11 @@ function normalizeSection(section) {
             };
           })
           .filter(Boolean)
+      : [],
+    streets: Array.isArray(section?.streets)
+      ? section.streets
+          .map((street, index) => normalizeStreet(street, index, sectionId || 'section'))
+          .filter((street) => Boolean(street.geojson))
       : []
   };
 }
@@ -203,6 +221,9 @@ function setForm(section) {
   document.getElementById('sectionClaimedBy').value = section?.claimedBy || '';
   document.getElementById('sectionChecklist').value = checklistToLines(section?.checklist || []);
   document.getElementById('sectionNotes').value = section?.notes || '';
+  document.getElementById('drawingTarget').value = 'section';
+  document.getElementById('streetName').value = '';
+  state.drawingTarget = 'section';
 }
 
 function clearDrawing() {
@@ -212,6 +233,14 @@ function clearDrawing() {
     drawnItems.removeLayer(activeLayer);
     activeLayer = null;
   }
+
+  state.draftStreets.forEach((street) => {
+    if (street.layer && drawnItems.hasLayer(street.layer)) {
+      drawnItems.removeLayer(street.layer);
+    }
+  });
+  state.draftStreets = [];
+  renderStreetDraftList();
 }
 
 function clearFormAndSelection() {
@@ -219,6 +248,71 @@ function clearFormAndSelection() {
   setForm(null);
   clearDrawing();
   renderBoard();
+  updateClaimHintFromMapCenter();
+}
+
+function getStreetStyle(street, isSelectedSection) {
+  const done = Boolean(street?.done);
+  return {
+    color: street?.color || '#16a34a',
+    weight: isSelectedSection ? 3 : 2,
+    fillOpacity: done ? 0.34 : 0.17,
+    dashArray: done ? '' : '6 4'
+  };
+}
+
+function syncDrawingTargetInput() {
+  const input = document.getElementById('drawingTarget');
+  if (!input) return;
+  input.value = state.drawingTarget === 'street' ? 'street' : 'section';
+}
+
+function renderStreetDraftList() {
+  const root = document.getElementById('streetDraftList');
+  if (!root) return;
+
+  if (!state.draftStreets.length) {
+    root.innerHTML =
+      '<p class="text-secondary mb-0">Switch Draw Mode to Street Layer and draw green areas inside the section.</p>';
+    return;
+  }
+
+  root.innerHTML = '';
+  state.draftStreets.forEach((street, index) => {
+    const row = document.createElement('div');
+    row.className = 'street-draft-item';
+    row.innerHTML = `
+      <input class="form-control form-control-sm street-draft-name" value="${street.name}" />
+      <label class="form-check mb-0 ms-2">
+        <input class="form-check-input street-draft-done" type="checkbox" ${street.done ? 'checked' : ''} />
+        <span class="form-check-label">Done</span>
+      </label>
+      <button type="button" class="btn btn-outline-danger btn-sm street-draft-remove">Remove</button>
+    `;
+
+    row.querySelector('.street-draft-name').addEventListener('input', (event) => {
+      const value = safeText(event.target.value).trim();
+      state.draftStreets[index].name = value || `Street ${index + 1}`;
+    });
+
+    row.querySelector('.street-draft-done').addEventListener('change', (event) => {
+      state.draftStreets[index].done = event.target.checked;
+      if (state.draftStreets[index].layer) {
+        state.draftStreets[index].layer.setStyle(getStreetStyle(state.draftStreets[index], true));
+      }
+    });
+
+    row.querySelector('.street-draft-remove').addEventListener('click', () => {
+      const target = state.draftStreets[index];
+      if (target?.layer && drawnItems?.hasLayer(target.layer)) {
+        drawnItems.removeLayer(target.layer);
+      }
+      state.draftStreets.splice(index, 1);
+      renderStreetDraftList();
+    });
+
+    root.appendChild(row);
+  });
 }
 
 function setMode(mode) {
@@ -241,6 +335,7 @@ function setMode(mode) {
 function setActiveFolder(folderId) {
   state.selectedFolderId = folderId || '';
   renderBoard();
+  updateClaimHintFromMapCenter();
 }
 
 function renderFolderSelectOptions() {
@@ -358,16 +453,30 @@ function renderMapSections() {
   filtered.forEach((section) => {
     if (!section.geojson) return;
 
-    const layer = L.geoJSON(section.geojson, {
+    const sectionLayer = L.geoJSON(section.geojson, {
       style: getSectionStyle(section)
     });
 
-    layer.eachLayer((child) => {
+    sectionLayer.eachLayer((child) => {
       child.on('click', () => focusSection(section.id, { zoom: false }));
       child.bindTooltip(`${section.name} (${statusLabels[section.status]})`, { sticky: true });
     });
 
-    savedSectionsLayer.addLayer(layer);
+    savedSectionsLayer.addLayer(sectionLayer);
+
+    (section.streets || []).forEach((street, index) => {
+      if (!street.geojson) return;
+      const streetLayer = L.geoJSON(street.geojson, {
+        style: getStreetStyle(street, state.selectedSectionId === section.id)
+      });
+
+      streetLayer.eachLayer((child) => {
+        child.on('click', () => focusSection(section.id, { zoom: false }));
+        child.bindTooltip(`${section.name} · ${street.name || `Street ${index + 1}`}`, { sticky: true });
+      });
+
+      savedSectionsLayer.addLayer(streetLayer);
+    });
   });
 
   if (!didFitBounds && !state.hasConfiguredMapBase && filtered.length && savedSectionsLayer.getLayers().length) {
@@ -408,6 +517,20 @@ function renderSectionsList() {
           )
           .join('')
       : '<p class="text-secondary mb-0">No checklist items yet.</p>';
+    const streetsHtml = section.streets.length
+      ? section.streets
+          .map(
+            (street) => `
+              <label class="form-check territory-check-item">
+                <input class="form-check-input street-toggle" type="checkbox" data-street-id="${street.id}" ${
+                  street.done ? 'checked' : ''
+                } />
+                <span class="form-check-label">${street.name}</span>
+              </label>
+            `
+          )
+          .join('')
+      : '<p class="text-secondary mb-0">No streets mapped yet.</p>';
 
     card.innerHTML = `
       <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
@@ -425,6 +548,10 @@ function renderSectionsList() {
         <span class="badge ${statusBadgeClass(section.status)}">${statusLabels[section.status]}</span>
       </div>
       <div class="territory-checklist mt-2">${checklistHtml}</div>
+      <div class="territory-checklist mt-2">
+        <p class="text-secondary small mb-1">Street Layer</p>
+        ${streetsHtml}
+      </div>
       <div class="d-flex gap-2 flex-wrap mt-3">
         <button type="button" class="btn btn-outline-primary btn-sm action-focus">Focus</button>
         <button type="button" class="btn btn-outline-secondary btn-sm action-edit">Edit</button>
@@ -489,6 +616,23 @@ function renderSectionsList() {
       });
     });
 
+    card.querySelectorAll('.street-toggle').forEach((input) => {
+      input.addEventListener('change', async (event) => {
+        await api(
+          `/api/sections/${section.id}/streets/${encodeURIComponent(
+            event.target.getAttribute('data-street-id')
+          )}`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              done: event.target.checked
+            })
+          }
+        );
+        await refreshData();
+      });
+    });
+
     root.appendChild(card);
   });
 }
@@ -520,6 +664,7 @@ function sectionLayerBounds(section) {
 function focusSection(sectionId, options = {}) {
   state.selectedSectionId = sectionId;
   renderBoard();
+  updateClaimHintFromMapCenter();
 
   if (!map || options.zoom === false) return;
 
@@ -542,10 +687,27 @@ function startEditingSection(sectionId) {
   if (section.geojson) {
     const layer = L.geoJSON(section.geojson);
     layer.eachLayer((child) => {
+      child.setStyle(getSectionStyle(section));
       drawnItems.addLayer(child);
       activeLayer = child;
     });
   }
+
+  state.draftStreets = [];
+  (section.streets || []).forEach((street, index) => {
+    if (!street.geojson) return;
+    const group = L.geoJSON(street.geojson);
+    group.eachLayer((child) => {
+      child.setStyle(getStreetStyle(street, true));
+      drawnItems.addLayer(child);
+      state.draftStreets.push({
+        ...normalizeStreet(street, index, section.id),
+        layer: child
+      });
+    });
+  });
+  renderStreetDraftList();
+  syncDrawingTargetInput();
 
   focusSection(sectionId, { zoom: true });
   setMode('map');
@@ -577,6 +739,7 @@ async function refreshData() {
   }
 
   renderBoard();
+  updateClaimHintFromMapCenter();
 }
 
 function extractGeometry(section) {
@@ -666,8 +829,10 @@ function haversineMeters(aLat, aLng, bLat, bLng) {
   return earthRadius * y;
 }
 
-function findBestSection(lat, lng) {
-  const candidates = getFilteredSections().filter((section) => Boolean(section.geojson));
+function findBestSection(lat, lng, sourceSections) {
+  const candidates = Array.isArray(sourceSections)
+    ? sourceSections.filter((section) => Boolean(section.geojson))
+    : getFilteredSections().filter((section) => Boolean(section.geojson));
   if (!candidates.length) return null;
 
   const containing = candidates.find((section) => sectionContainsPoint(section, lat, lng));
@@ -737,65 +902,56 @@ async function completeSection(sectionId) {
   focusSection(sectionId, { zoom: false });
 }
 
-function requestCurrentPosition() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('Geolocation is not supported on this device.'));
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => resolve(position.coords),
-      (error) => reject(error),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-  });
-}
-
 function setLocationHint(text) {
-  document.getElementById('locationHint').textContent = text;
+  const hint = document.getElementById('locationHint');
+  if (hint) {
+    hint.textContent = text;
+  }
 }
 
-async function locateUser() {
-  const coords = await requestCurrentPosition();
-  state.currentLocation = { lat: coords.latitude, lng: coords.longitude };
-
+function claimReferencePoint() {
   if (map) {
-    map.setView([coords.latitude, coords.longitude], 16);
-
-    if (locationMarker) {
-      map.removeLayer(locationMarker);
-    }
-
-    locationMarker = L.marker([coords.latitude, coords.longitude]).addTo(map);
-    locationMarker.bindPopup('Your location').openPopup();
+    const center = map.getCenter();
+    return { lat: center.lat, lng: center.lng, source: 'map' };
   }
 
-  const match = findBestSection(coords.latitude, coords.longitude);
-  if (match) {
-    if (match.inside) {
-      setLocationHint(`You are inside "${match.section.name}".`);
-    } else {
-      setLocationHint(
-        `Nearest section: "${match.section.name}" (${Math.round(match.distanceMeters)}m away).`
-      );
-    }
-    focusSection(match.section.id, { zoom: false });
-  } else {
-    setLocationHint('Location found, but no mapped sections are available in this filter.');
+  const fallback = resolveConfiguredMapBase();
+  return { lat: fallback.lat, lng: fallback.lng, source: 'church' };
+}
+
+function updateClaimHintFromMapCenter() {
+  const reference = claimReferencePoint();
+  const filtered = getFilteredSections().filter((section) => Boolean(section.geojson));
+  const openSections = filtered.filter((section) => section.status !== 'completed');
+  const source = openSections.length ? openSections : filtered;
+  const match = findBestSection(reference.lat, reference.lng, source);
+
+  if (!match?.section) {
+    setLocationHint('No mapped sections available to claim in this filter.');
+    return;
   }
 
-  return match;
+  if (match.inside) {
+    setLocationHint(`Map center is inside "${match.section.name}".`);
+    return;
+  }
+
+  setLocationHint(`Nearest section from map center: "${match.section.name}" (${Math.round(match.distanceMeters)}m).`);
 }
 
 async function claimNearestSection() {
-  let match = null;
-
-  if (!state.currentLocation) {
-    match = await locateUser();
-  } else {
-    match = findBestSection(state.currentLocation.lat, state.currentLocation.lng);
+  const selected = state.sections.find((entry) => entry.id === state.selectedSectionId);
+  if (selected?.id && selected.status !== 'completed') {
+    await claimSection(selected.id);
+    setLocationHint(`Claimed selected section "${selected.name}".`);
+    return;
   }
+
+  const reference = claimReferencePoint();
+  const filtered = getFilteredSections().filter((section) => Boolean(section.geojson));
+  const preferred = filtered.filter((section) => section.status === 'unclaimed');
+  const source = preferred.length ? preferred : filtered;
+  const match = findBestSection(reference.lat, reference.lng, source);
 
   if (!match?.section) {
     window.alert('No section available to claim.');
@@ -803,7 +959,8 @@ async function claimNearestSection() {
   }
 
   await claimSection(match.section.id);
-  setLocationHint(`Claimed "${match.section.name}".`);
+  const distanceText = match.inside ? 'inside current map center area' : `${Math.round(match.distanceMeters)}m from map center`;
+  setLocationHint(`Claimed "${match.section.name}" (${distanceText}).`);
 }
 
 function initializeMap() {
@@ -843,9 +1000,51 @@ function initializeMap() {
   map.addControl(drawControl);
 
   map.on(L.Draw.Event.CREATED, (event) => {
-    clearDrawing();
-    activeLayer = event.layer;
-    drawnItems.addLayer(activeLayer);
+    const target = state.drawingTarget === 'street' ? 'street' : 'section';
+
+    if (target === 'section') {
+      if (activeLayer && drawnItems.hasLayer(activeLayer)) {
+        drawnItems.removeLayer(activeLayer);
+      }
+
+      activeLayer = event.layer;
+      const sectionColor = safeText(document.getElementById('sectionColor')?.value) || '#0c4a6e';
+      activeLayer.setStyle({
+        color: sectionColor,
+        weight: 3,
+        fillOpacity: 0.24
+      });
+      drawnItems.addLayer(activeLayer);
+      return;
+    }
+
+    if (!activeLayer) {
+      window.alert('Draw the red section outline first, then add streets inside it.');
+      return;
+    }
+
+    draftStreetCounter += 1;
+    const customStreetName = safeText(document.getElementById('streetName')?.value).trim();
+    const streetDraft = normalizeStreet({
+      id: `draft-street-${Date.now()}-${draftStreetCounter}`,
+      name: customStreetName || `Street ${state.draftStreets.length + 1}`,
+      done: false,
+      color: '#16a34a',
+      geojson: event.layer.toGeoJSON()
+    });
+    event.layer.setStyle(getStreetStyle(streetDraft, true));
+    drawnItems.addLayer(event.layer);
+
+    state.draftStreets.push({
+      ...streetDraft,
+      layer: event.layer
+    });
+    document.getElementById('streetName').value = '';
+    renderStreetDraftList();
+  });
+
+  map.on('moveend', () => {
+    updateClaimHintFromMapCenter();
   });
 }
 
@@ -870,6 +1069,21 @@ async function saveSection(event) {
     return;
   }
 
+  const streetsSource = activeLayer || state.draftStreets.length ? state.draftStreets : existing?.streets || [];
+  const streets = streetsSource
+    .map((street, index) => {
+      const normalized = normalizeStreet(
+        {
+          ...street,
+          geojson: street?.layer ? street.layer.toGeoJSON() : street?.geojson
+        },
+        index,
+        sectionId || 'new'
+      );
+      return normalized.geojson ? normalized : null;
+    })
+    .filter(Boolean);
+
   const payload = {
     id: sectionId,
     name: safeText(document.getElementById('sectionName').value).trim(),
@@ -883,7 +1097,8 @@ async function saveSection(event) {
       document.getElementById('sectionChecklist').value,
       sectionId || 'new'
     ),
-    geojson: geometry
+    geojson: geometry,
+    streets
   };
 
   await api('/api/sections', {
@@ -902,11 +1117,15 @@ async function init() {
   state.mapSettings = normalizeMapSettings(state.mapSettings);
 
   initializeMap();
+  setForm(null);
+  syncDrawingTargetInput();
+  renderStreetDraftList();
 
   renderBoard();
   setMode('map');
 
   await refreshData();
+  updateClaimHintFromMapCenter();
 }
 
 function onError(error) {
@@ -993,12 +1212,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       await saveSection(event);
     });
 
-    document.getElementById('locateMe').addEventListener('click', async () => {
-      try {
-        await locateUser();
-      } catch (error) {
-        onError(error);
-      }
+    document.getElementById('drawingTarget').addEventListener('change', (event) => {
+      state.drawingTarget = safeText(event.target.value) === 'street' ? 'street' : 'section';
+      syncDrawingTargetInput();
+    });
+
+    document.getElementById('sectionColor').addEventListener('change', (event) => {
+      if (!activeLayer) return;
+      activeLayer.setStyle({
+        color: safeText(event.target.value) || '#0c4a6e'
+      });
     });
 
     document.getElementById('claimNearest').addEventListener('click', async () => {

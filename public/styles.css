@@ -105,6 +105,25 @@ body {
   margin-bottom: 0;
 }
 
+.street-draft-list {
+  border: 1px solid #e6ecf5;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.street-draft-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.street-draft-item .street-draft-name {
+  flex: 1;
+}
+
 .church-settings-shell {
   max-width: 1180px;
 }
@@ -203,5 +222,9 @@ body {
 
   .territory-card {
     padding: 0.75rem;
+  }
+
+  .street-draft-item {
+    flex-wrap: wrap;
   }
 }

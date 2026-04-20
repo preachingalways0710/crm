@@ -2832,6 +2832,37 @@ function normalizeChecklist(checklist, sectionId = 'section') {
     .filter(Boolean);
 }
 
+function normalizeSectionStreets(streets, sectionId = 'section') {
+  if (!Array.isArray(streets)) {
+    return [];
+  }
+
+  return streets
+    .map((street, index) => {
+      if (!street || typeof street !== 'object') {
+        return null;
+      }
+
+      const geojson = street.geojson || null;
+      if (!geojson) {
+        return null;
+      }
+
+      const name = normalize(street.name || street.label || street.text) || `Street ${index + 1}`;
+      const done = parseBoolean(street.done);
+
+      return {
+        id: normalize(street.id) || `${sectionId}-street-${index + 1}`,
+        name,
+        color: normalize(street.color) || '#16a34a',
+        done,
+        completedAt: done ? normalize(street.completedAt) : '',
+        geojson
+      };
+    })
+    .filter(Boolean);
+}
+
 function hydrateFolder(folder, index = 0) {
   const folderId = normalize(folder?.id) || `folder-${index + 1}`;
 
@@ -2859,7 +2890,8 @@ function hydrateSection(section, index = 0) {
     claimedBy: status === 'unclaimed' ? '' : normalize(section?.claimedBy),
     claimedAt: status === 'unclaimed' ? '' : normalize(section?.claimedAt),
     completedAt: status === 'completed' ? normalize(section?.completedAt) : '',
-    checklist: normalizeChecklist(section?.checklist, sectionId)
+    checklist: normalizeChecklist(section?.checklist, sectionId),
+    streets: normalizeSectionStreets(section?.streets, sectionId)
   };
 }
 
@@ -3106,6 +3138,10 @@ app.post('/api/sections', async (req, res, next) => {
       checklist: normalizeChecklist(req.body.checklist, sectionId).map((item) => ({
         ...item,
         completedAt: item.done ? item.completedAt || nowIso : ''
+      })),
+      streets: normalizeSectionStreets(req.body.streets, sectionId).map((street) => ({
+        ...street,
+        completedAt: street.done ? street.completedAt || nowIso : ''
       }))
     };
 
@@ -3322,6 +3358,69 @@ app.post('/api/sections/:id/checklist', async (req, res, next) => {
 
     if (!itemFound) {
       return res.status(400).json({ error: 'checklist item not found' });
+    }
+
+    res.json({ ok: true, section: hydrateSection(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/sections/:id/streets/:streetId', async (req, res, next) => {
+  try {
+    const sectionId = normalize(req.params.id);
+    const streetId = normalize(req.params.streetId);
+    const nowIso = new Date().toISOString();
+    let updated = null;
+    let sectionExists = false;
+    let streetFound = false;
+
+    if (!streetId) {
+      return res.status(400).json({ error: 'streetId is required' });
+    }
+
+    await updateData((data) => {
+      data.sections = Array.isArray(data.sections) ? data.sections : [];
+      const idx = data.sections.findIndex((entry) => normalize(entry.id) === sectionId);
+
+      if (idx === -1) {
+        return data;
+      }
+
+      sectionExists = true;
+      const section = hydrateSection(data.sections[idx], idx);
+      const done = parseBoolean(req.body.done);
+      const streets = normalizeSectionStreets(section.streets, section.id).map((street) => {
+        if (street.id !== streetId) {
+          return street;
+        }
+
+        streetFound = true;
+        return {
+          ...street,
+          done,
+          completedAt: done ? street.completedAt || nowIso : ''
+        };
+      });
+
+      if (!streetFound) {
+        return data;
+      }
+
+      updated = {
+        ...section,
+        streets
+      };
+      data.sections[idx] = updated;
+      return data;
+    });
+
+    if (!sectionExists) {
+      return res.status(404).json({ error: 'section not found' });
+    }
+
+    if (!streetFound) {
+      return res.status(400).json({ error: 'street not found' });
     }
 
     res.json({ ok: true, section: hydrateSection(updated) });

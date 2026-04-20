@@ -67,6 +67,17 @@
             <label class="form-label">Claimed By</label>
             <input class="form-control" id="sectionClaimedBy" placeholder="Volunteer name" />
           </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label">Draw Mode</label>
+            <select class="form-select" id="drawingTarget">
+              <option value="section">Section Outline (Red)</option>
+              <option value="street">Street Layer (Green)</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label">Street Name</label>
+            <input class="form-control" id="streetName" placeholder="Rua Recife - Block A" />
+          </div>
           <div class="col-12 col-md-6">
             <label class="form-label">Checklist (one item per line)</label>
             <textarea class="form-control" id="sectionChecklist" rows="2" placeholder="Knock doors&#10;Pray with family&#10;Leave flyer"></textarea>
@@ -75,9 +86,15 @@
             <label class="form-label">Notes</label>
             <textarea class="form-control" id="sectionNotes" rows="2"></textarea>
           </div>
+          <div class="col-12">
+            <label class="form-label">Streets In This Section</label>
+            <div class="street-draft-list" id="streetDraftList">
+              <p class="text-secondary mb-0">Switch Draw Mode to Street Layer and draw green areas inside the section.</p>
+            </div>
+          </div>
           <div class="col-12 d-flex align-items-end gap-2">
             <button type="submit" class="btn btn-primary">Save Section</button>
-            <button type="button" class="btn btn-outline-secondary" id="clearDrawing">Clear</button>
+            <button type="button" class="btn btn-outline-secondary" id="clearDrawing">Clear Draft</button>
           </div>
         </form>
       </div>
@@ -87,18 +104,15 @@
       <div class="card-header"><h3 class="card-title">Field Claim Mode (Mobile)</h3></div>
       <div class="card-body">
         <div class="row g-2">
-          <div class="col-12 col-md-4">
+          <div class="col-12 col-md-5">
             <label class="form-label">Worker Name</label>
             <input class="form-control" id="claimWorkerName" placeholder="Your name" />
           </div>
-          <div class="col-6 col-md-4 d-flex align-items-end">
-            <button type="button" class="btn btn-outline-primary w-100" id="locateMe">Use My Location</button>
-          </div>
-          <div class="col-6 col-md-4 d-flex align-items-end">
-            <button type="button" class="btn btn-success w-100" id="claimNearest">Claim Nearest</button>
+          <div class="col-12 col-md-4 d-flex align-items-end">
+            <button type="button" class="btn btn-success w-100" id="claimNearest">Claim Selected / Nearest</button>
           </div>
           <div class="col-12">
-            <p class="text-secondary mb-0" id="locationHint">Location not set yet.</p>
+            <p class="text-secondary mb-0" id="locationHint">Claiming uses church map base + current map view (no phone location needed).</p>
           </div>
         </div>
       </div>
