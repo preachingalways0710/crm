@@ -155,13 +155,12 @@ function normalizeMapProfile(profile) {
 }
 
 function normalizeMapSettings(settings) {
-  const mode = safeText(settings?.mapCenterMode) === 'profile' ? 'profile' : 'church';
   const zoomRaw = Number.parseInt(safeText(settings?.mapCenterZoom), 10);
 
   return {
-    mapCenterMode: mode,
+    mapCenterMode: 'church',
     mapCenterZoom: Number.isInteger(zoomRaw) ? Math.min(20, Math.max(3, zoomRaw)) : 17,
-    profilePersonId: safeText(settings?.profilePersonId),
+    profilePersonId: '',
     churchProfile: {
       name: safeText(settings?.churchProfile?.name),
       address: safeText(settings?.churchProfile?.address),
@@ -174,15 +173,6 @@ function normalizeMapSettings(settings) {
 function resolveConfiguredMapBase() {
   const settings = normalizeMapSettings(state.mapSettings);
   const zoom = Math.max(settings.mapCenterZoom || 17, 17);
-
-  if (settings.mapCenterMode === 'profile') {
-    const profile = state.mapProfiles.find((entry) => entry.id === settings.profilePersonId);
-    const lat = parseCoordinate(profile?.lat, -90, 90);
-    const lng = parseCoordinate(profile?.lng, -180, 180);
-    if (lat !== null && lng !== null) {
-      return { lat, lng, zoom, hasConfiguredMapBase: true };
-    }
-  }
 
   const churchLat = parseCoordinate(settings.churchProfile.lat, -90, 90);
   const churchLng = parseCoordinate(settings.churchProfile.lng, -180, 180);

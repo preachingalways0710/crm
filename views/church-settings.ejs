@@ -39,9 +39,8 @@
           <p class="text-secondary text-uppercase fw-bold mb-2">Sections</p>
           <a class="church-settings-link active" href="#church-details"><i class="bi bi-house-door me-2"></i>Church Details</a>
           <a class="church-settings-link" href="#contact-details"><i class="bi bi-telephone me-2"></i>Contact Details</a>
-          <a class="church-settings-link" href="#map-defaults"><i class="bi bi-geo-alt me-2"></i>Map Defaults</a>
           <div class="church-settings-side-note">
-            Visitation map is centered from this profile.
+            Visitation map is automatically centered from the church address.
           </div>
         </div>
       </div>
@@ -96,32 +95,6 @@
           </div>
         </div>
 
-        <div class="card church-settings-panel" id="map-defaults">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <h3 class="card-title mb-0">Map Defaults</h3>
-            <span class="text-secondary"><i class="bi bi-compass me-1"></i>Used by Visitation</span>
-          </div>
-          <div class="card-body row g-2">
-            <div class="col-12 col-md-4">
-              <label class="form-label">Detected Latitude</label>
-              <input class="form-control" value="<%= churchSettings.mapLat || '-' %>" disabled />
-            </div>
-            <div class="col-12 col-md-4">
-              <label class="form-label">Detected Longitude</label>
-              <input class="form-control" value="<%= churchSettings.mapLng || '-' %>" disabled />
-            </div>
-            <div class="col-12 col-md-2">
-              <label class="form-label">Default Zoom</label>
-              <input class="form-control" name="mapCenterZoom" type="number" min="3" max="20" value="<%= mapCenterZoom || 16 %>" />
-            </div>
-            <div class="col-12 col-md-2 d-flex align-items-end">
-              <span class="badge bg-blue-lt">Auto</span>
-            </div>
-            <div class="col-12">
-              <p class="text-secondary mb-0">Coordinates are automatically detected from address + city/state/ZIP when you save.</p>
-            </div>
-          </div>
-        </div>
         </fieldset>
 
         <div class="d-flex">

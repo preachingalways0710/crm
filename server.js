@@ -186,28 +186,26 @@ function mergeVisitationWithChurchSettings(mapSettings, churchSettings) {
   const churchAddress = formatChurchAddress(churchSettings);
 
   return {
-    ...mapSettings,
+    mapCenterMode: 'church',
+    mapCenterZoom: normalizeMapZoom(mapSettings?.mapCenterZoom, 17),
+    profilePersonId: '',
     churchProfile: {
-      ...mapSettings.churchProfile,
-      name: churchSettings.name || mapSettings.churchProfile.name,
-      address: churchAddress || mapSettings.churchProfile.address,
-      lat: churchSettings.mapLat || mapSettings.churchProfile.lat,
-      lng: churchSettings.mapLng || mapSettings.churchProfile.lng
+      name: churchSettings.name || normalize(mapSettings?.churchProfile?.name),
+      address: churchAddress || normalize(mapSettings?.churchProfile?.address),
+      lat: churchSettings.mapLat || normalizeLatitude(mapSettings?.churchProfile?.lat),
+      lng: churchSettings.mapLng || normalizeLongitude(mapSettings?.churchProfile?.lng)
     }
   };
 }
 
 function hydrateVisitationSettings(settings, people = []) {
   const raw = settings && typeof settings === 'object' ? settings : {};
-  const mode = normalize(raw.mapCenterMode) === 'profile' ? 'profile' : 'church';
   const churchProfile = raw.churchProfile && typeof raw.churchProfile === 'object' ? raw.churchProfile : {};
-  const profilePersonId = normalize(raw.profilePersonId);
-  const peopleIds = new Set((people || []).map((entry) => entry.id));
 
   return {
-    mapCenterMode: mode,
-    mapCenterZoom: normalizeMapZoom(raw.mapCenterZoom, 16),
-    profilePersonId: peopleIds.has(profilePersonId) ? profilePersonId : '',
+    mapCenterMode: 'church',
+    mapCenterZoom: normalizeMapZoom(raw.mapCenterZoom, 17),
+    profilePersonId: '',
     churchProfile: {
       name: normalize(churchProfile.name),
       address: normalize(churchProfile.address),
@@ -1353,7 +1351,6 @@ app.get('/settings/church', async (req, res, next) => {
   try {
     const data = await readData();
     const churchSettings = hydrateChurchSettings((data.settings || {}).church);
-    const visitationSettings = hydrateVisitationSettings((data.settings || {}).visitation, data.people || []);
     const saveStatus = normalize(req.query.saved) === '1' ? 'saved' : '';
     const geocodeStatus = normalize(req.query.geocode);
     const isReadOnly = !isSessionAdmin(req);
@@ -1361,7 +1358,6 @@ app.get('/settings/church', async (req, res, next) => {
     res.render('church-settings', {
       activeTab: 'church_settings',
       churchSettings,
-      mapCenterZoom: visitationSettings.mapCenterZoom || 16,
       saveStatus,
       geocodeStatus,
       isReadOnly
@@ -1384,7 +1380,6 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       zipCode: req.body.zipCode
     });
 
-    const mapCenterZoom = normalizeMapZoom(req.body.mapCenterZoom, 16);
     const geocodeQuery = formatChurchAddress(churchSettings);
 
     if (!geocodeQuery) {
@@ -1428,7 +1423,7 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       data.settings.visitation = {
         ...currentVisitation,
         mapCenterMode: 'church',
-        mapCenterZoom,
+        mapCenterZoom: normalizeMapZoom(currentVisitation.mapCenterZoom, 17),
         profilePersonId: '',
         churchProfile: {
           name: resolvedChurchSettings.name,
@@ -3104,74 +3099,37 @@ app.post('/api/visitation/settings', async (req, res, next) => {
     const current = await readData();
     const people = Array.isArray(current.people) ? current.people : [];
     const mapProfiles = sortByName(people).map((entry) => mapProfileSummary(entry));
-    const mapProfilesById = mapProfiles.reduce((acc, entry) => {
-      acc[entry.id] = entry;
-      return acc;
-    }, {});
     let churchSettings = hydrateChurchSettings((current.settings || {}).church);
+    const currentVisitation = hydrateVisitationSettings((current.settings || {}).visitation, people);
+    const nextZoom = normalize(req.body.mapCenterZoom)
+      ? normalizeMapZoom(req.body.mapCenterZoom, currentVisitation.mapCenterZoom || 17)
+      : currentVisitation.mapCenterZoom || 17;
     let mapSettings = mergeVisitationWithChurchSettings(
-      hydrateVisitationSettings(
-        {
-          mapCenterMode: req.body.mapCenterMode,
-          mapCenterZoom: req.body.mapCenterZoom,
-          profilePersonId: req.body.profilePersonId
-        },
-        people
-      ),
+      {
+        ...currentVisitation,
+        mapCenterZoom: nextZoom
+      },
       churchSettings
     );
 
-    if (mapSettings.mapCenterMode === 'church') {
-      const churchAddress = formatChurchAddress(churchSettings);
-      mapSettings = {
-        ...mapSettings,
-        mapCenterMode: 'church',
-        profilePersonId: '',
-        churchProfile: {
-          ...mapSettings.churchProfile,
-          name: churchSettings.name || mapSettings.churchProfile.name,
-          address: churchAddress || mapSettings.churchProfile.address,
-          lat: churchSettings.mapLat,
-          lng: churchSettings.mapLng
-        }
-      };
-
-      const hasChurchCoordinates = Boolean(mapSettings.churchProfile.lat && mapSettings.churchProfile.lng);
-      if (!hasChurchCoordinates && churchAddress) {
-        const geocoded = await geocodeAddress(churchSettings);
-        if (geocoded) {
-          churchSettings = {
-            ...churchSettings,
-            mapLat: geocoded.lat,
-            mapLng: geocoded.lng
-          };
-          mapSettings = {
-            ...mapSettings,
-            churchProfile: {
-              ...mapSettings.churchProfile,
-              lat: geocoded.lat,
-              lng: geocoded.lng
-            }
-          };
-        }
-      }
-
-      if (!mapSettings.churchProfile.lat || !mapSettings.churchProfile.lng) {
-        return res.status(400).json({
-          error: 'Set church address so map base can be located.'
-        });
+    const churchAddress = formatChurchAddress(churchSettings);
+    const hasChurchCoordinates = Boolean(mapSettings.churchProfile.lat && mapSettings.churchProfile.lng);
+    if (!hasChurchCoordinates && churchAddress) {
+      const geocoded = await geocodeAddress(churchSettings);
+      if (geocoded) {
+        churchSettings = {
+          ...churchSettings,
+          mapLat: geocoded.lat,
+          mapLng: geocoded.lng
+        };
+        mapSettings = mergeVisitationWithChurchSettings(mapSettings, churchSettings);
       }
     }
 
-    if (mapSettings.mapCenterMode === 'profile') {
-      if (!mapSettings.profilePersonId) {
-        return res.status(400).json({ error: 'Choose a profile person for profile-based map center.' });
-      }
-
-      const profile = mapProfilesById[mapSettings.profilePersonId];
-      if (!profile || !profile.lat || !profile.lng) {
-        return res.status(400).json({ error: 'Selected profile needs valid latitude and longitude.' });
-      }
+    if (!mapSettings.churchProfile.lat || !mapSettings.churchProfile.lng) {
+      return res.status(400).json({
+        error: 'Set church address so map base can be located.'
+      });
     }
 
     await updateData((data) => {
