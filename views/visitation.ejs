@@ -1,7 +1,7 @@
 <%- include('partials-nav', { activeTab }) %>
 
 <div class="row g-3 visitation-layout">
-  <div class="col-12 col-lg-3">
+  <div class="col-12 col-lg-3" id="visitationSidebarCol">
     <div class="card mb-3 sticky-card visitation-sidebar">
       <div class="card-header"><h3 class="card-title">Folders</h3></div>
       <div class="card-body">
@@ -30,7 +30,7 @@
     </div>
   </div>
 
-  <div class="col-12 col-lg-9">
+  <div class="col-12 col-lg-9" id="visitationMainCol">
     <div class="card mb-3">
       <div class="card-header"><h3 class="card-title">Territory Builder</h3></div>
       <div class="card-body">
@@ -127,7 +127,34 @@
         <span class="badge bg-azure-lt" id="activeFolderLabel">All Folders</span>
       </div>
       <div class="card-body">
-        <div id="mapWrap"><div id="map"></div></div>
+        <div id="mapWrap">
+          <div class="map-top-controls">
+            <div class="map-top-left">
+              <div class="btn-group btn-group-sm map-layer-toggle" role="group" aria-label="Map style">
+                <button type="button" class="btn btn-light" id="mapStyleMapBtn">Map</button>
+                <button type="button" class="btn btn-light active" id="mapStyleSatelliteBtn">Satellite</button>
+              </div>
+              <div class="btn-group btn-group-sm map-tools" role="group" aria-label="Map tools">
+                <button type="button" class="btn btn-light" id="toggleFoldersBtn" title="Show folders">
+                  <i class="bi bi-folder2-open"></i>
+                </button>
+                <button type="button" class="btn btn-light" id="addMarkerBtn" title="Add marker">
+                  <i class="bi bi-geo-alt"></i>
+                </button>
+                <button type="button" class="btn btn-light" id="addMapBtn" title="Add map">
+                  <i class="bi bi-bounding-box"></i>
+                </button>
+                <button type="button" class="btn btn-light active" id="toggleMapNamesBtn" title="Show map names">
+                  <i class="bi bi-tag"></i>
+                </button>
+              </div>
+            </div>
+            <div class="map-top-right">
+              <input class="form-control form-control-sm" id="mapSearchInput" placeholder="Search Location" />
+            </div>
+          </div>
+          <div id="map"></div>
+        </div>
         <div id="listWrap" class="d-none"><div id="sectionsList"></div></div>
       </div>
     </div>
@@ -139,8 +166,8 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script>
-  window.__VISITATION_BOOTSTRAP__ = <%- JSON.stringify({ sections, folders, mapSettings, mapProfiles }) %>;
+  window.__VISITATION_BOOTSTRAP__ = <%- JSON.stringify({ sections, folders, markers, mapSettings, mapProfiles }) %>;
 </script>
-<script src="/static/js/visitation.js?v=20260421"></script>
+<script src="/static/js/visitation.js?v=20260421b"></script>
 
 <%- include('partials-footer') %>

@@ -2982,6 +2982,21 @@ function hydrateSection(section, index = 0) {
   };
 }
 
+function hydrateMarker(marker, index = 0) {
+  const markerId = normalize(marker?.id) || `marker-${index + 1}`;
+  const lat = normalizeLatitude(marker?.lat);
+  const lng = normalizeLongitude(marker?.lng);
+
+  return {
+    id: markerId,
+    name: normalize(marker?.name) || `Marker ${index + 1}`,
+    notes: normalize(marker?.notes),
+    color: normalize(marker?.color) || '#2563eb',
+    lat,
+    lng
+  };
+}
+
 app.get('/visitation', async (req, res, next) => {
   try {
     const data = await readData();
@@ -2997,6 +3012,7 @@ app.get('/visitation', async (req, res, next) => {
       activeTab: 'visitation',
       sections: (data.sections || []).map((entry, index) => hydrateSection(entry, index)),
       folders: (data.folders || []).map((entry, index) => hydrateFolder(entry, index)),
+      markers: (data.markers || []).map((entry, index) => hydrateMarker(entry, index)),
       mapProfiles,
       mapSettings
     });
@@ -3124,6 +3140,71 @@ app.get('/api/folders', async (req, res, next) => {
   try {
     const data = await readData();
     res.json((data.folders || []).map((entry, index) => hydrateFolder(entry, index)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/markers', async (req, res, next) => {
+  try {
+    const data = await readData();
+    res.json(
+      (data.markers || [])
+        .map((entry, index) => hydrateMarker(entry, index))
+        .filter((entry) => Boolean(entry.lat && entry.lng))
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/markers', async (req, res, next) => {
+  try {
+    const payload = hydrateMarker(
+      {
+        id: req.body.id,
+        name: req.body.name,
+        notes: req.body.notes,
+        color: req.body.color,
+        lat: req.body.lat,
+        lng: req.body.lng
+      },
+      0
+    );
+
+    if (!payload.lat || !payload.lng) {
+      return res.status(400).json({ error: 'lat and lng are required' });
+    }
+
+    if (!payload.id || payload.id === 'marker-1') {
+      payload.id = id();
+    }
+
+    await updateData((data) => {
+      data.markers = Array.isArray(data.markers) ? data.markers : [];
+      const idx = data.markers.findIndex((entry) => normalize(entry.id) === payload.id);
+      if (idx === -1) {
+        data.markers.push(payload);
+      } else {
+        data.markers[idx] = payload;
+      }
+      return data;
+    });
+
+    res.json({ ok: true, marker: payload });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete('/api/markers/:id', async (req, res, next) => {
+  try {
+    const markerId = normalize(req.params.id);
+    await updateData((data) => {
+      data.markers = (data.markers || []).filter((entry) => normalize(entry.id) !== markerId);
+      return data;
+    });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

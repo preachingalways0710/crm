@@ -1,14 +1,25 @@
 let map;
 let drawnItems;
 let savedSectionsLayer;
+let savedMarkersLayer;
 let activeLayer = null;
 let didFitBounds = false;
 let draftStreetCounter = 0;
+let mapBaseLayer;
+let mapLabelLayer;
+let mapLayerMode = 'satellite';
 
-const boot = window.__VISITATION_BOOTSTRAP__ || { sections: [], folders: [], mapSettings: {}, mapProfiles: [] };
+const boot = window.__VISITATION_BOOTSTRAP__ || {
+  sections: [],
+  folders: [],
+  markers: [],
+  mapSettings: {},
+  mapProfiles: []
+};
 const state = {
   sections: Array.isArray(boot.sections) ? boot.sections : [],
   folders: Array.isArray(boot.folders) ? boot.folders : [],
+  markers: Array.isArray(boot.markers) ? boot.markers : [],
   mapProfiles: Array.isArray(boot.mapProfiles) ? boot.mapProfiles : [],
   mapSettings: boot.mapSettings && typeof boot.mapSettings === 'object' ? boot.mapSettings : {},
   selectedFolderId: '',
@@ -16,7 +27,9 @@ const state = {
   mode: 'map',
   drawingTarget: 'section',
   draftStreets: [],
-  hasConfiguredMapBase: false
+  hasConfiguredMapBase: false,
+  showMapNames: true,
+  foldersVisible: true
 };
 
 const statusLabels = {
@@ -112,6 +125,17 @@ function normalizeFolder(folder) {
   };
 }
 
+function normalizeMarker(marker, index = 0) {
+  return {
+    id: safeText(marker?.id) || `marker-${index + 1}`,
+    name: safeText(marker?.name) || `Marker ${index + 1}`,
+    notes: safeText(marker?.notes),
+    color: safeText(marker?.color) || '#2563eb',
+    lat: safeText(marker?.lat),
+    lng: safeText(marker?.lng)
+  };
+}
+
 function parseCoordinate(value, min, max) {
   const parsed = Number.parseFloat(safeText(value).replace(',', '.'));
   if (!Number.isFinite(parsed)) return null;
@@ -166,6 +190,139 @@ function resolveConfiguredMapBase() {
   }
 
   return { lat: 47.6062, lng: -122.3321, zoom: 11, hasConfiguredMapBase: false };
+}
+
+function buildMapBaseLayer(mode) {
+  if (mode === 'map') {
+    return L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+      maxZoom: 20,
+      subdomains: 'abcd',
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    });
+  }
+
+  return L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {
+      maxZoom: 20,
+      attribution: 'Tiles &copy; Esri'
+    }
+  );
+}
+
+function buildMapLabelLayer() {
+  return L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+    maxZoom: 20,
+    subdomains: 'abcd',
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+  });
+}
+
+function applyMapStyle(mode = mapLayerMode) {
+  mapLayerMode = mode === 'map' ? 'map' : 'satellite';
+  if (!map) return;
+
+  if (mapBaseLayer && map.hasLayer(mapBaseLayer)) {
+    map.removeLayer(mapBaseLayer);
+  }
+  if (mapLabelLayer && map.hasLayer(mapLabelLayer)) {
+    map.removeLayer(mapLabelLayer);
+  }
+
+  mapBaseLayer = buildMapBaseLayer(mapLayerMode);
+  mapBaseLayer.addTo(map);
+
+  if (state.showMapNames) {
+    mapLabelLayer = buildMapLabelLayer();
+    mapLabelLayer.addTo(map);
+  }
+
+  syncTopControlState();
+}
+
+function syncTopControlState() {
+  const mapBtn = document.getElementById('mapStyleMapBtn');
+  const satelliteBtn = document.getElementById('mapStyleSatelliteBtn');
+  const namesBtn = document.getElementById('toggleMapNamesBtn');
+  const foldersBtn = document.getElementById('toggleFoldersBtn');
+  if (!mapBtn || !satelliteBtn || !namesBtn || !foldersBtn) return;
+
+  mapBtn.classList.toggle('active', mapLayerMode === 'map');
+  satelliteBtn.classList.toggle('active', mapLayerMode === 'satellite');
+  namesBtn.classList.toggle('active', state.showMapNames);
+  foldersBtn.classList.toggle('active', state.foldersVisible);
+}
+
+function toggleFoldersPanel() {
+  const sidebar = document.getElementById('visitationSidebarCol');
+  const main = document.getElementById('visitationMainCol');
+  if (!sidebar || !main) return;
+
+  state.foldersVisible = !state.foldersVisible;
+  sidebar.classList.toggle('d-none', !state.foldersVisible);
+  main.classList.toggle('col-lg-9', state.foldersVisible);
+  main.classList.toggle('col-lg-12', !state.foldersVisible);
+  syncTopControlState();
+
+  if (map) {
+    setTimeout(() => map.invalidateSize(), 120);
+  }
+}
+
+function startAddMarkerMode() {
+  if (!map) return;
+  const drawMarker = new L.Draw.Marker(map);
+  drawMarker.enable();
+}
+
+function startAddMapMode() {
+  state.drawingTarget = 'section';
+  syncDrawingTargetInput();
+  if (!map) return;
+  const drawPolygon = new L.Draw.Polygon(map, {
+    allowIntersection: false,
+    showArea: true
+  });
+  drawPolygon.enable();
+}
+
+function toggleMapNames() {
+  state.showMapNames = !state.showMapNames;
+  applyMapStyle(mapLayerMode);
+  renderBoard();
+}
+
+async function searchLocation(query) {
+  const q = safeText(query).trim();
+  if (!q) return;
+
+  const url = new URL('https://nominatim.openstreetmap.org/search');
+  url.searchParams.set('q', q);
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('limit', '1');
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: 'application/json'
+    }
+  });
+  if (!response.ok) {
+    throw new Error('Could not search this location right now.');
+  }
+
+  const rows = await response.json();
+  if (!Array.isArray(rows) || !rows.length) {
+    throw new Error('Location not found.');
+  }
+
+  const first = rows[0];
+  const lat = Number.parseFloat(first.lat);
+  const lng = Number.parseFloat(first.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new Error('Location not found.');
+  }
+
+  map.setView([lat, lng], 16);
 }
 
 function statusBadgeClass(status) {
@@ -489,6 +646,48 @@ function renderMapSections() {
   }
 }
 
+function renderMapMarkers() {
+  if (!savedMarkersLayer) return;
+  savedMarkersLayer.clearLayers();
+
+  state.markers.forEach((marker, index) => {
+    const lat = parseCoordinate(marker.lat, -90, 90);
+    const lng = parseCoordinate(marker.lng, -180, 180);
+    if (lat === null || lng === null) return;
+
+    const layer = L.circleMarker([lat, lng], {
+      radius: 7,
+      color: marker.color || '#2563eb',
+      fillColor: marker.color || '#2563eb',
+      fillOpacity: 0.95,
+      weight: 2
+    });
+    const markerName = marker.name || `Marker ${index + 1}`;
+    const markerNotes = marker.notes ? `<p class="mb-2">${marker.notes}</p>` : '';
+    layer.bindPopup(
+      `<strong>${markerName}</strong>${markerNotes}<button type="button" class="btn btn-sm btn-outline-danger marker-delete-btn" data-marker-id="${marker.id}">Delete Marker</button>`
+    );
+
+    layer.on('popupopen', (event) => {
+      const popupRoot = event.popup.getElement();
+      const deleteButton = popupRoot?.querySelector('.marker-delete-btn');
+      if (!deleteButton) return;
+      deleteButton.addEventListener('click', async () => {
+        const ok = window.confirm(`Delete marker "${markerName}"?`);
+        if (!ok) return;
+        await api(`/api/markers/${marker.id}`, { method: 'DELETE' });
+        await refreshData();
+      });
+    });
+
+    if (state.showMapNames) {
+      layer.bindTooltip(markerName, { permanent: false, direction: 'top', offset: [0, -6] });
+    }
+
+    savedMarkersLayer.addLayer(layer);
+  });
+}
+
 function renderSectionsList() {
   const root = document.getElementById('sectionsList');
   root.innerHTML = '';
@@ -648,7 +847,9 @@ function renderBoard() {
   renderFolderSidebar();
   renderActiveFolderLabel();
   renderMapSections();
+  renderMapMarkers();
   renderSectionsList();
+  syncTopControlState();
 }
 
 function sectionLayerBounds(section) {
@@ -714,13 +915,15 @@ function startEditingSection(sectionId) {
 }
 
 async function refreshData() {
-  const [sections, folders, visitationSettings] = await Promise.all([
+  const [sections, folders, markers, visitationSettings] = await Promise.all([
     api('/api/sections'),
     api('/api/folders'),
+    api('/api/markers'),
     api('/api/visitation/settings')
   ]);
   state.sections = (sections || []).map((entry) => normalizeSection(entry));
   state.folders = (folders || []).map((entry) => normalizeFolder(entry));
+  state.markers = (markers || []).map((entry, index) => normalizeMarker(entry, index));
   state.mapProfiles = (visitationSettings?.mapProfiles || []).map((entry) => normalizeMapProfile(entry));
   state.mapSettings = normalizeMapSettings(visitationSettings?.mapSettings || {});
 
@@ -970,14 +1173,12 @@ function initializeMap() {
   state.hasConfiguredMapBase = Boolean(initialView.hasConfiguredMapBase);
   map = L.map('map').setView([initialView.lat, initialView.lng], initialView.zoom);
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
-
   drawnItems = new L.FeatureGroup();
   savedSectionsLayer = new L.FeatureGroup();
+  savedMarkersLayer = new L.FeatureGroup();
+  applyMapStyle('satellite');
   map.addLayer(savedSectionsLayer);
+  map.addLayer(savedMarkersLayer);
   map.addLayer(drawnItems);
 
   const drawControl = new L.Control.Draw({
@@ -999,7 +1200,29 @@ function initializeMap() {
 
   map.addControl(drawControl);
 
-  map.on(L.Draw.Event.CREATED, (event) => {
+  map.on(L.Draw.Event.CREATED, async (event) => {
+    if (event.layerType === 'marker') {
+      try {
+        const latLng = event.layer.getLatLng();
+        let markerName =
+          window.prompt('Marker name', `Marker ${state.markers.length + 1}`) || '';
+        markerName = markerName.trim() || `Marker ${state.markers.length + 1}`;
+        await api('/api/markers', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: markerName,
+            lat: latLng.lat,
+            lng: latLng.lng
+          })
+        });
+        await refreshData();
+        setLocationHint(`Marker "${markerName}" added.`);
+      } catch (error) {
+        onError(error);
+      }
+      return;
+    }
+
     const target = state.drawingTarget === 'street' ? 'street' : 'section';
 
     if (target === 'section') {
@@ -1113,6 +1336,7 @@ async function saveSection(event) {
 async function init() {
   state.sections = state.sections.map((entry) => normalizeSection(entry));
   state.folders = state.folders.map((entry) => normalizeFolder(entry));
+  state.markers = state.markers.map((entry, index) => normalizeMarker(entry, index));
   state.mapProfiles = state.mapProfiles.map((entry) => normalizeMapProfile(entry));
   state.mapSettings = normalizeMapSettings(state.mapSettings);
 
@@ -1227,6 +1451,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('claimNearest').addEventListener('click', async () => {
       try {
         await claimNearestSection();
+      } catch (error) {
+        onError(error);
+      }
+    });
+
+    document.getElementById('mapStyleMapBtn').addEventListener('click', () => {
+      applyMapStyle('map');
+    });
+
+    document.getElementById('mapStyleSatelliteBtn').addEventListener('click', () => {
+      applyMapStyle('satellite');
+    });
+
+    document.getElementById('toggleFoldersBtn').addEventListener('click', () => {
+      toggleFoldersPanel();
+    });
+
+    document.getElementById('addMarkerBtn').addEventListener('click', () => {
+      startAddMarkerMode();
+    });
+
+    document.getElementById('addMapBtn').addEventListener('click', () => {
+      startAddMapMode();
+    });
+
+    document.getElementById('toggleMapNamesBtn').addEventListener('click', () => {
+      toggleMapNames();
+    });
+
+    document.getElementById('mapSearchInput').addEventListener('keydown', async (event) => {
+      if (event.key !== 'Enter') return;
+      try {
+        event.preventDefault();
+        await searchLocation(event.target.value);
       } catch (error) {
         onError(error);
       }
