@@ -29,7 +29,8 @@ const state = {
   draftStreets: [],
   hasConfiguredMapBase: false,
   showMapNames: true,
-  foldersVisible: true
+  foldersVisible: true,
+  mapBearing: 0
 };
 
 const statusLabels = {
@@ -159,7 +160,7 @@ function normalizeMapSettings(settings) {
 
   return {
     mapCenterMode: mode,
-    mapCenterZoom: Number.isInteger(zoomRaw) ? Math.min(20, Math.max(3, zoomRaw)) : 16,
+    mapCenterZoom: Number.isInteger(zoomRaw) ? Math.min(20, Math.max(3, zoomRaw)) : 17,
     profilePersonId: safeText(settings?.profilePersonId),
     churchProfile: {
       name: safeText(settings?.churchProfile?.name),
@@ -172,7 +173,7 @@ function normalizeMapSettings(settings) {
 
 function resolveConfiguredMapBase() {
   const settings = normalizeMapSettings(state.mapSettings);
-  const zoom = Math.max(settings.mapCenterZoom || 16, 16);
+  const zoom = Math.max(settings.mapCenterZoom || 17, 17);
 
   if (settings.mapCenterMode === 'profile') {
     const profile = state.mapProfiles.find((entry) => entry.id === settings.profilePersonId);
@@ -189,7 +190,7 @@ function resolveConfiguredMapBase() {
     return { lat: churchLat, lng: churchLng, zoom, hasConfiguredMapBase: true };
   }
 
-  return { lat: 47.6062, lng: -122.3321, zoom: 15, hasConfiguredMapBase: false };
+  return { lat: 47.6062, lng: -122.3321, zoom: 17, hasConfiguredMapBase: false };
 }
 
 function buildMapBaseLayer(mode) {
@@ -292,6 +293,48 @@ function toggleMapNames() {
   renderBoard();
 }
 
+function supportsMapRotation() {
+  return Boolean(map && typeof map.setBearing === 'function' && typeof map.getBearing === 'function');
+}
+
+function normalizeBearing(value) {
+  let bearing = Number.parseFloat(value);
+  if (!Number.isFinite(bearing)) return 0;
+  bearing %= 360;
+  if (bearing < 0) bearing += 360;
+  if (bearing > 180) bearing -= 360;
+  return Number.parseFloat(bearing.toFixed(1));
+}
+
+function syncRotationControls() {
+  const left = document.getElementById('rotateLeftBtn');
+  const right = document.getElementById('rotateRightBtn');
+  const reset = document.getElementById('rotateResetBtn');
+  const controls = [left, right, reset].filter(Boolean);
+  if (!controls.length) return;
+
+  const canRotate = supportsMapRotation();
+  controls.forEach((button) => {
+    button.classList.toggle('disabled', !canRotate);
+    button.disabled = !canRotate;
+  });
+
+  if (!canRotate) return;
+  state.mapBearing = normalizeBearing(map.getBearing());
+  reset.classList.toggle('active', Math.abs(state.mapBearing) > 0.05);
+}
+
+function setMapBearing(nextBearing) {
+  if (!supportsMapRotation()) return;
+  map.setBearing(nextBearing);
+  state.mapBearing = normalizeBearing(map.getBearing());
+  syncRotationControls();
+}
+
+function rotateMapBy(deltaDegrees) {
+  setMapBearing(state.mapBearing + deltaDegrees);
+}
+
 async function searchLocation(query) {
   const q = safeText(query).trim();
   if (!q) return;
@@ -322,7 +365,7 @@ async function searchLocation(query) {
     throw new Error('Location not found.');
   }
 
-  map.setView([lat, lng], 16);
+  map.setView([lat, lng], 18);
 }
 
 function statusBadgeClass(status) {
@@ -533,7 +576,7 @@ function renderMapSettingsForm() {
   const zoomInput = document.getElementById('mapCenterZoom');
 
   modeInput.value = settings.mapCenterMode;
-  zoomInput.value = settings.mapCenterZoom || 16;
+  zoomInput.value = settings.mapCenterZoom || 17;
   churchNameInput.value = settings.churchProfile.name || '';
   churchAddressInput.value = settings.churchProfile.address || '';
   churchLatInput.value = settings.churchProfile.lat || '';
@@ -644,9 +687,9 @@ function renderMapSections() {
     });
   });
 
-  if (!didFitBounds && !state.hasConfiguredMapBase && filtered.length && savedSectionsLayer.getLayers().length) {
+  if (!didFitBounds && filtered.length && savedSectionsLayer.getLayers().length) {
     try {
-      map.fitBounds(savedSectionsLayer.getBounds(), { padding: [24, 24], maxZoom: 15 });
+      map.fitBounds(savedSectionsLayer.getBounds(), { padding: [26, 26], maxZoom: 18 });
       didFitBounds = true;
     } catch {
       // no-op
@@ -1179,7 +1222,12 @@ function initializeMap() {
 
   const initialView = resolveConfiguredMapBase();
   state.hasConfiguredMapBase = Boolean(initialView.hasConfiguredMapBase);
-  map = L.map('map').setView([initialView.lat, initialView.lng], initialView.zoom);
+  map = L.map('map', {
+    rotate: true,
+    bearing: 0,
+    touchRotate: true,
+    rotateControl: false
+  }).setView([initialView.lat, initialView.lng], initialView.zoom);
 
   drawnItems = new L.FeatureGroup();
   savedSectionsLayer = new L.FeatureGroup();
@@ -1188,6 +1236,7 @@ function initializeMap() {
   map.addLayer(savedSectionsLayer);
   map.addLayer(savedMarkersLayer);
   map.addLayer(drawnItems);
+  syncRotationControls();
 
   const drawControl = new L.Control.Draw({
     draw: {
@@ -1277,12 +1326,16 @@ function initializeMap() {
   map.on('moveend', () => {
     updateClaimHintFromMapCenter();
   });
+
+  map.on('rotate', () => {
+    syncRotationControls();
+  });
 }
 
 function applyConfiguredMapBaseToMap() {
   const view = resolveConfiguredMapBase();
   state.hasConfiguredMapBase = Boolean(view.hasConfiguredMapBase);
-  didFitBounds = state.hasConfiguredMapBase;
+  didFitBounds = false;
 
   if (!map) return;
   map.setView([view.lat, view.lng], view.zoom);
@@ -1486,6 +1539,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     document.getElementById('toggleMapNamesBtn').addEventListener('click', () => {
       toggleMapNames();
+    });
+
+    document.getElementById('rotateLeftBtn').addEventListener('click', () => {
+      rotateMapBy(-15);
+    });
+
+    document.getElementById('rotateResetBtn').addEventListener('click', () => {
+      setMapBearing(0);
+    });
+
+    document.getElementById('rotateRightBtn').addEventListener('click', () => {
+      rotateMapBy(15);
     });
 
     document.getElementById('mapSearchInput').addEventListener('keydown', async (event) => {

@@ -24,6 +24,17 @@ body {
   position: relative;
 }
 
+.page-visitation .page-wrapper > .container-xl.py-3 {
+  max-width: 100%;
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+}
+
+.visitation-canvas {
+  margin-left: calc(50% - 50vw + 0.3rem);
+  margin-right: calc(50% - 50vw + 0.3rem);
+}
+
 .map-top-controls {
   position: absolute;
   top: 0.8rem;
@@ -45,13 +56,18 @@ body {
 }
 
 .map-layer-toggle .btn.active,
-.map-tools .btn.active {
+.map-tools .btn.active,
+.map-rotate-tools .btn.active {
   background: #1d4ed8;
   border-color: #1d4ed8;
   color: #ffffff;
 }
 
 .map-tools .btn {
+  min-width: 2rem;
+}
+
+.map-rotate-tools .btn {
   min-width: 2rem;
 }
 
@@ -75,27 +91,28 @@ body {
 
 @media (min-width: 992px) {
   .visitation-layout {
-    --bs-gutter-x: 0.45rem;
+    --bs-gutter-x: 0.2rem;
   }
 
   #visitationSidebarCol {
-    flex: 0 0 max(11%, 210px);
-    max-width: max(11%, 210px);
+    flex: 0 0 max(9.6%, 182px);
+    max-width: max(9.6%, 182px);
   }
 
   #visitationMainCol {
-    flex: 0 0 calc(100% - max(11%, 210px));
-    max-width: calc(100% - max(11%, 210px));
-    padding-right: 0.1rem;
+    flex: 0 0 calc(100% - max(9.6%, 182px));
+    max-width: calc(100% - max(9.6%, 182px));
+    padding-right: 0;
   }
 
   #visitationMainCol .visitation-map-card {
     margin-right: 0;
+    margin-left: 0;
   }
 
   #visitationMainCol .visitation-map-card .card-body {
-    padding-right: 0.4rem;
-    padding-left: 0.45rem;
+    padding-right: 0.15rem;
+    padding-left: 0.15rem;
   }
 }
 
@@ -286,6 +303,16 @@ body {
 }
 
 @media (max-width: 992px) {
+  .page-visitation .page-wrapper > .container-xl.py-3 {
+    padding-left: 0.6rem;
+    padding-right: 0.6rem;
+  }
+
+  .visitation-canvas {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
   .sticky-card {
     position: static;
   }

@@ -1,5 +1,10 @@
 <%- include('partials-nav', { activeTab }) %>
 
+<script>
+  document.body.classList.add('page-visitation');
+</script>
+
+<div class="visitation-canvas">
 <div class="row g-3 visitation-layout">
   <div class="col-12 col-lg-3" id="visitationSidebarCol">
     <div class="card mb-3 sticky-card visitation-sidebar">
@@ -148,6 +153,17 @@
                   <i class="bi bi-tag"></i>
                 </button>
               </div>
+              <div class="btn-group btn-group-sm map-rotate-tools" role="group" aria-label="Map rotation">
+                <button type="button" class="btn btn-light" id="rotateLeftBtn" title="Rotate left">
+                  <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
+                <button type="button" class="btn btn-light" id="rotateResetBtn" title="Reset rotation">
+                  <i class="bi bi-compass"></i>
+                </button>
+                <button type="button" class="btn btn-light" id="rotateRightBtn" title="Rotate right">
+                  <i class="bi bi-arrow-clockwise"></i>
+                </button>
+              </div>
             </div>
             <div class="map-top-right">
               <input class="form-control form-control-sm" id="mapSearchInput" placeholder="Search Location" />
@@ -160,14 +176,16 @@
     </div>
   </div>
 </div>
+</div>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script>
   window.__VISITATION_BOOTSTRAP__ = <%- JSON.stringify({ sections, folders, markers, mapSettings, mapProfiles }) %>;
 </script>
-<script src="/static/js/visitation.js?v=20260421d"></script>
+<script src="/static/js/visitation.js?v=20260421f"></script>
 
 <%- include('partials-footer') %>
