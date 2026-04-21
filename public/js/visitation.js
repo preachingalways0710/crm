@@ -272,7 +272,13 @@ function startAddMapMode() {
   if (!map) return;
   const drawPolygon = new L.Draw.Polygon(map, {
     allowIntersection: false,
-    showArea: true
+    showArea: true,
+    showLength: true,
+    shapeOptions: {
+      color: '#dc2626',
+      weight: 3,
+      fillOpacity: 0.2
+    }
   });
   drawPolygon.enable();
 }
@@ -385,6 +391,122 @@ function parseChecklistInput(rawText, sectionId) {
       };
     })
     .filter((item) => item.label.length > 0);
+}
+
+function suggestNextAreaName() {
+  const used = new Set(
+    state.sections
+      .map((section) => safeText(section?.name).trim().toLowerCase())
+      .filter(Boolean)
+  );
+  let counter = state.sections.length + 1;
+  let candidate = `Area ${counter}`;
+  while (used.has(candidate.toLowerCase())) {
+    counter += 1;
+    candidate = `Area ${counter}`;
+  }
+  return candidate;
+}
+
+function findFolderByName(name) {
+  const target = safeText(name).trim().toLowerCase();
+  if (!target) return null;
+  return (
+    state.folders.find((folder) => safeText(folder?.name).trim().toLowerCase() === target) || null
+  );
+}
+
+async function ensureFolderForArea(name, color) {
+  const existing = findFolderByName(name);
+  if (existing?.id) return existing.id;
+
+  const payload = {
+    name: safeText(name).trim(),
+    color: safeText(color).trim() || '#20c997'
+  };
+  const created = await api('/api/folders', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  const folder = normalizeFolder(created?.folder || created || payload);
+  if (folder.id) {
+    if (!state.folders.some((entry) => entry.id === folder.id)) {
+      state.folders.push(folder);
+    }
+    return folder.id;
+  }
+
+  await refreshData();
+  return findFolderByName(name)?.id || '';
+}
+
+async function quickCreateSectionFromLayer(layer) {
+  if (!layer) return null;
+
+  const currentName = safeText(document.getElementById('sectionName')?.value).trim();
+  const suggestedName = currentName || suggestNextAreaName();
+  const requested = window.prompt('Name this territory area', suggestedName);
+
+  if (requested === null) {
+    if (drawnItems?.hasLayer(layer)) {
+      drawnItems.removeLayer(layer);
+    }
+    activeLayer = null;
+    return null;
+  }
+
+  const sectionName = safeText(requested).trim();
+  if (!sectionName) {
+    window.alert('Area name is required.');
+    if (drawnItems?.hasLayer(layer)) {
+      drawnItems.removeLayer(layer);
+    }
+    activeLayer = null;
+    return null;
+  }
+
+  const sectionColor = safeText(document.getElementById('sectionColor')?.value).trim() || '#dc2626';
+  const folderColor = safeText(document.getElementById('folderColor')?.value).trim() || '#20c997';
+  const folderId = await ensureFolderForArea(sectionName, folderColor);
+
+  const created = await api('/api/sections', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: sectionName,
+      folderId,
+      color: sectionColor,
+      status: 'unclaimed',
+      lastVisited: '',
+      claimedBy: '',
+      notes: '',
+      checklist: [],
+      geojson: layer.toGeoJSON(),
+      streets: []
+    })
+  });
+
+  if (drawnItems?.hasLayer(layer)) {
+    drawnItems.removeLayer(layer);
+  }
+  activeLayer = null;
+  state.draftStreets = [];
+  renderStreetDraftList();
+  setForm(null);
+
+  await refreshData();
+  if (folderId) {
+    setActiveFolder(folderId);
+  }
+
+  const sectionId = safeText(created?.section?.id);
+  if (sectionId) {
+    state.drawingTarget = 'street';
+    syncDrawingTargetInput();
+    startEditingSection(sectionId);
+    setLocationHint(`Area "${sectionName}" saved. Draw green street blocks inside it now.`);
+  }
+
+  return created?.section || null;
 }
 
 function getFolderName(folderId) {
@@ -642,6 +764,14 @@ function getSectionStyle(section) {
   };
 }
 
+function handleSectionMapClick(sectionId) {
+  if (state.drawingTarget === 'street') {
+    startEditingSection(sectionId);
+    return;
+  }
+  focusSection(sectionId, { zoom: false });
+}
+
 function renderMapSections() {
   if (!savedSectionsLayer) return;
 
@@ -656,7 +786,7 @@ function renderMapSections() {
     });
 
     sectionLayer.eachLayer((child) => {
-      child.on('click', () => focusSection(section.id, { zoom: false }));
+      child.on('click', () => handleSectionMapClick(section.id));
       child.bindTooltip(`${section.name} (${statusLabels[section.status]})`, { sticky: true });
     });
 
@@ -669,7 +799,7 @@ function renderMapSections() {
       });
 
       streetLayer.eachLayer((child) => {
-        child.on('click', () => focusSection(section.id, { zoom: false }));
+        child.on('click', () => handleSectionMapClick(section.id));
         child.bindTooltip(`${section.name} · ${street.name || `Street ${index + 1}`}`, { sticky: true });
       });
 
@@ -921,8 +1051,11 @@ function startEditingSection(sectionId) {
   const section = state.sections.find((entry) => entry.id === sectionId);
   if (!section) return;
 
+  const preferredTarget = state.drawingTarget === 'street' ? 'street' : 'section';
   state.selectedSectionId = sectionId;
   setForm(section);
+  state.drawingTarget = preferredTarget;
+  syncDrawingTargetInput();
 
   clearDrawing();
 
@@ -949,7 +1082,6 @@ function startEditingSection(sectionId) {
     });
   });
   renderStreetDraftList();
-  syncDrawingTargetInput();
 
   focusSection(sectionId, { zoom: true });
   setMode('map');
@@ -1228,6 +1360,12 @@ function initializeMap() {
   map.addLayer(drawnItems);
   syncRotationControls();
 
+  if (L.drawLocal?.draw?.handlers?.polygon?.tooltip) {
+    L.drawLocal.draw.handlers.polygon.tooltip.start = 'Click map points to start area boundary.';
+    L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Click more points to keep drawing the boundary.';
+    L.drawLocal.draw.handlers.polygon.tooltip.end = 'Click the first point to close and finish the area.';
+  }
+
   const drawControl = new L.Control.Draw({
     draw: {
       marker: false,
@@ -1237,7 +1375,13 @@ function initializeMap() {
       circlemarker: false,
       polygon: {
         allowIntersection: false,
-        showArea: true
+        showArea: true,
+        showLength: true,
+        shapeOptions: {
+          color: '#dc2626',
+          weight: 3,
+          fillOpacity: 0.2
+        }
       }
     },
     edit: {
@@ -1285,6 +1429,14 @@ function initializeMap() {
         fillOpacity: 0.24
       });
       drawnItems.addLayer(activeLayer);
+
+      if (state.mode === 'map') {
+        try {
+          await quickCreateSectionFromLayer(activeLayer);
+        } catch (error) {
+          onError(error);
+        }
+      }
       return;
     }
 
