@@ -267,15 +267,26 @@ function startAddMarkerMode() {
 }
 
 function startAddMapMode() {
-  state.drawingTarget = 'section';
+  const shouldDrawStreet = state.drawingTarget === 'street' || Boolean(state.selectedSectionId);
+  state.drawingTarget = shouldDrawStreet ? 'street' : 'section';
   syncDrawingTargetInput();
+
+  if (state.drawingTarget === 'street' && !activeLayer && state.selectedSectionId) {
+    startEditingSection(state.selectedSectionId);
+  }
+
+  if (state.drawingTarget === 'street' && !activeLayer) {
+    window.alert('Click an area first so streets can be drawn inside it.');
+    return;
+  }
+
   if (!map) return;
   const drawPolygon = new L.Draw.Polygon(map, {
     allowIntersection: false,
     showArea: true,
     showLength: true,
     shapeOptions: {
-      color: '#dc2626',
+      color: state.drawingTarget === 'street' ? '#16a34a' : '#dc2626',
       weight: 3,
       fillOpacity: 0.2
     }
@@ -765,11 +776,14 @@ function getSectionStyle(section) {
 }
 
 function handleSectionMapClick(sectionId) {
-  if (state.drawingTarget === 'street') {
-    startEditingSection(sectionId);
-    return;
+  state.drawingTarget = 'street';
+  syncDrawingTargetInput();
+  startEditingSection(sectionId);
+  startAddMapMode();
+  const section = state.sections.find((entry) => entry.id === sectionId);
+  if (section?.name) {
+    setLocationHint(`Editing "${section.name}". Draw green street segments inside this area.`);
   }
-  focusSection(sectionId, { zoom: false });
 }
 
 function renderMapSections() {
@@ -787,7 +801,13 @@ function renderMapSections() {
 
     sectionLayer.eachLayer((child) => {
       child.on('click', () => handleSectionMapClick(section.id));
-      child.bindTooltip(`${section.name} (${statusLabels[section.status]})`, { sticky: true });
+      child.bindTooltip(section.name, {
+        permanent: state.showMapNames,
+        sticky: !state.showMapNames,
+        direction: 'top',
+        offset: [0, -8],
+        className: 'territory-area-label'
+      });
     });
 
     savedSectionsLayer.addLayer(sectionLayer);
