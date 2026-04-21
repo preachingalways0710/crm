@@ -6,13 +6,15 @@
       <div class="card-header">
         <h3 class="card-title">People Directory</h3>
         <div class="card-actions d-flex gap-2">
-          <span class="badge bg-secondary-lt"><%= people.length %> people</span>
+          <span class="badge bg-secondary-lt">
+            <%= totalFilteredPeople ? `Showing ${pageRangeStart}-${pageRangeEnd} of ${totalFilteredPeople} people` : '0 people' %>
+          </span>
           <a class="btn btn-primary btn-sm" href="/people/new">+ Person</a>
         </div>
       </div>
       <div class="card-body border-bottom">
         <form method="get" action="/people" class="row g-2">
-          <div class="col-12 col-md-4">
+          <div class="col-12 col-md-3">
             <label class="form-label">Search</label>
             <input class="form-control" name="q" value="<%= q || '' %>" placeholder="Name, phone, email, section, notes" />
           </div>
@@ -40,6 +42,14 @@
                 <option value="<%= tag %>"></option>
               <% }) %>
             </datalist>
+          </div>
+          <div class="col-12 col-md-1">
+            <label class="form-label">Per Page</label>
+            <select class="form-select" name="perPage">
+              <% pageSizeOptions.forEach((size) => { %>
+                <option value="<%= size %>" <%= pageSize === size ? 'selected' : '' %>><%= size %></option>
+              <% }) %>
+            </select>
           </div>
           <div class="col-12 col-md-2 d-flex align-items-end gap-2">
             <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
@@ -118,6 +128,24 @@
           </tbody>
         </table>
       </div>
+      <% if (totalPages > 1) { %>
+        <div class="card-footer d-flex align-items-center">
+          <p class="m-0 text-secondary">Page <%= currentPage %> of <%= totalPages %> · <%= pageSize %> per page</p>
+          <ul class="pagination m-0 ms-auto">
+            <li class="page-item <%= previousPageUrl ? '' : 'disabled' %>">
+              <a class="page-link" href="<%= previousPageUrl || '#' %>" aria-disabled="<%= previousPageUrl ? 'false' : 'true' %>">Previous</a>
+            </li>
+            <% paginationLinks.forEach((pageLink) => { %>
+              <li class="page-item <%= pageLink.isCurrent ? 'active' : '' %>">
+                <a class="page-link" href="<%= pageLink.url %>"><%= pageLink.number %></a>
+              </li>
+            <% }) %>
+            <li class="page-item <%= nextPageUrl ? '' : 'disabled' %>">
+              <a class="page-link" href="<%= nextPageUrl || '#' %>" aria-disabled="<%= nextPageUrl ? 'false' : 'true' %>">Next</a>
+            </li>
+          </ul>
+        </div>
+      <% } %>
     </div>
   </div>
 

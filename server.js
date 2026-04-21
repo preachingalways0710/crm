@@ -37,7 +37,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 }
 });
-const PEOPLE_DIRECTORY_PAGE_SIZE = 25;
+const PEOPLE_DIRECTORY_DEFAULT_PAGE_SIZE = 50;
+const PEOPLE_DIRECTORY_PAGE_SIZES = [25, 50, 100];
 
 function id() {
   return crypto.randomUUID();
@@ -1525,16 +1526,23 @@ app.get('/people', async (req, res, next) => {
     }
 
     const totalFilteredPeople = people.length;
-    const totalPages = Math.max(1, Math.ceil(totalFilteredPeople / PEOPLE_DIRECTORY_PAGE_SIZE));
+    const requestedPageSize = Number.parseInt(normalize(req.query.perPage), 10);
+    const pageSize = PEOPLE_DIRECTORY_PAGE_SIZES.includes(requestedPageSize)
+      ? requestedPageSize
+      : PEOPLE_DIRECTORY_DEFAULT_PAGE_SIZE;
+    const totalPages = Math.max(1, Math.ceil(totalFilteredPeople / pageSize));
     const requestedPage = Number.parseInt(normalize(req.query.page), 10);
     const currentPage =
       Number.isInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, totalPages) : 1;
-    const pageStartIndex = (currentPage - 1) * PEOPLE_DIRECTORY_PAGE_SIZE;
-    const pagedPeople = people.slice(pageStartIndex, pageStartIndex + PEOPLE_DIRECTORY_PAGE_SIZE);
+    const pageStartIndex = (currentPage - 1) * pageSize;
+    const pagedPeople = people.slice(pageStartIndex, pageStartIndex + pageSize);
     const pageRangeStart = totalFilteredPeople ? pageStartIndex + 1 : 0;
     const pageRangeEnd = Math.min(totalFilteredPeople, pageStartIndex + pagedPeople.length);
 
     const basePaginationParams = new URLSearchParams();
+    if (pageSize !== PEOPLE_DIRECTORY_DEFAULT_PAGE_SIZE) {
+      basePaginationParams.set('perPage', String(pageSize));
+    }
     if (selectedSmartFilter?.id) {
       basePaginationParams.set('smartFilter', selectedSmartFilter.id);
     } else {
@@ -1596,6 +1604,8 @@ app.get('/people', async (req, res, next) => {
       activeTab: 'people',
       people: pagedPeople,
       totalFilteredPeople,
+      pageSize,
+      pageSizeOptions: PEOPLE_DIRECTORY_PAGE_SIZES,
       currentPage,
       totalPages,
       pageRangeStart,
