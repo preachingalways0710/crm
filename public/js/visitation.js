@@ -677,7 +677,7 @@ function renderMapSections() {
     });
   });
 
-  if (!didFitBounds && filtered.length && savedSectionsLayer.getLayers().length) {
+  if (!didFitBounds && !state.hasConfiguredMapBase && filtered.length && savedSectionsLayer.getLayers().length) {
     try {
       map.fitBounds(savedSectionsLayer.getBounds(), { padding: [26, 26], maxZoom: 18 });
       didFitBounds = true;
@@ -1325,7 +1325,7 @@ function initializeMap() {
 function applyConfiguredMapBaseToMap() {
   const view = resolveConfiguredMapBase();
   state.hasConfiguredMapBase = Boolean(view.hasConfiguredMapBase);
-  didFitBounds = false;
+  didFitBounds = state.hasConfiguredMapBase;
 
   if (!map) return;
   map.setView([view.lat, view.lng], view.zoom);

@@ -582,9 +582,76 @@ function buildGeocodeCandidates(input) {
   return candidates;
 }
 
+function normalizePlaceToken(value) {
+  return stripDiacritics(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function isPreferredGeocodeMatch(result, churchSettings = {}) {
+  const address = result && typeof result === 'object' ? result.address || {} : {};
+  const likelyBrazil = isLikelyBrazilAddress(churchSettings);
+  const cityInput = normalize(churchSettings.city);
+  const stateInput = normalize(churchSettings.state);
+  const zipInput = normalize(churchSettings.zipCode).replace(/\D/g, '');
+
+  if (likelyBrazil) {
+    const countryCode = normalize(address.country_code).toLowerCase();
+    if (countryCode && countryCode !== 'br') return false;
+  }
+
+  if (cityInput) {
+    const cityToken = normalizePlaceToken(cityInput);
+    const locationTokens = [
+      address.city,
+      address.town,
+      address.village,
+      address.municipality,
+      address.hamlet,
+      address.county,
+      address.state_district
+    ]
+      .map((value) => normalizePlaceToken(value))
+      .filter(Boolean);
+    if (cityToken && !locationTokens.some((token) => token.includes(cityToken) || cityToken.includes(token))) {
+      return false;
+    }
+  }
+
+  if (stateInput) {
+    const normalizedState = normalizePlaceToken(address.state);
+    const stateAscii = stripDiacritics(stateInput).toLowerCase();
+    const stateToken = normalizePlaceToken(stateInput);
+    if (stateAscii.length === 2) {
+      const stateCode = stateAscii.toUpperCase();
+      const isoState = normalize(address['ISO3166-2-lvl4']).toUpperCase();
+      const stateCodeToken = normalizePlaceToken(stateAscii);
+      const matchesStateName = normalizedState
+        ? normalizedState.includes(stateCodeToken) || stateCodeToken.includes(normalizedState)
+        : false;
+      const matchesIsoState = isoState.endsWith(`-${stateCode}`);
+      if (!matchesStateName && !matchesIsoState) {
+        return false;
+      }
+    } else if (stateToken && normalizedState && !normalizedState.includes(stateToken) && !stateToken.includes(normalizedState)) {
+      return false;
+    }
+  }
+
+  if (zipInput) {
+    const resultZip = normalize(address.postcode).replace(/\D/g, '');
+    if (resultZip && !resultZip.startsWith(zipInput.slice(0, 5))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function geocodeAddress(input) {
   const candidates = buildGeocodeCandidates(input);
   if (!candidates.length) return null;
+  const churchSettings = typeof input === 'string' ? null : hydrateChurchSettings(input || {});
 
   const endpoint = 'https://nominatim.openstreetmap.org/search';
 
@@ -592,7 +659,7 @@ async function geocodeAddress(input) {
     try {
       const url = new URL(endpoint);
       url.searchParams.set('format', 'jsonv2');
-      url.searchParams.set('limit', '1');
+      url.searchParams.set('limit', '5');
       url.searchParams.set('addressdetails', '1');
       if (candidate.countrycodes) {
         url.searchParams.set('countrycodes', candidate.countrycodes);
@@ -622,9 +689,22 @@ async function geocodeAddress(input) {
       const rows = await response.json();
       if (!Array.isArray(rows) || rows.length === 0) continue;
 
-      const first = rows[0] || {};
-      const lat = normalizeLatitude(first.lat);
-      const lng = normalizeLongitude(first.lon);
+      let picked = rows[0] || {};
+      const requiresHintMatch = Boolean(
+        churchSettings &&
+          (normalize(churchSettings.city) || normalize(churchSettings.state) || isLikelyBrazilAddress(churchSettings))
+      );
+      if (churchSettings) {
+        const preferred = rows.find((row) => isPreferredGeocodeMatch(row, churchSettings));
+        if (preferred) {
+          picked = preferred;
+        } else if (requiresHintMatch) {
+          continue;
+        }
+      }
+
+      const lat = normalizeLatitude(picked.lat);
+      const lng = normalizeLongitude(picked.lon);
       if (!lat || !lng) continue;
 
       return { lat, lng };
