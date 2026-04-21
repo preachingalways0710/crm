@@ -187,10 +187,10 @@ function mergeVisitationWithChurchSettings(mapSettings, churchSettings) {
     ...mapSettings,
     churchProfile: {
       ...mapSettings.churchProfile,
-      name: mapSettings.churchProfile.name || churchSettings.name,
-      address: mapSettings.churchProfile.address || churchAddress,
-      lat: mapSettings.churchProfile.lat || churchSettings.mapLat,
-      lng: mapSettings.churchProfile.lng || churchSettings.mapLng
+      name: churchSettings.name || mapSettings.churchProfile.name,
+      address: churchAddress || mapSettings.churchProfile.address,
+      lat: churchSettings.mapLat || mapSettings.churchProfile.lat,
+      lng: churchSettings.mapLng || mapSettings.churchProfile.lng
     }
   };
 }
@@ -500,50 +500,136 @@ async function fetchWithTimeout(url, options = {}) {
   }
 }
 
-async function geocodeAddress(address) {
-  const query = normalize(address);
-  if (!query) return null;
+function stripDiacritics(value) {
+  return normalize(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
 
-  const endpoints = [
-    'https://nominatim.openstreetmap.org/search',
-    'http://nominatim.openstreetmap.org/search'
-  ];
+const brazilStateHints = new Set([
+  'ac', 'al', 'am', 'ap', 'ba', 'ce', 'df', 'es', 'go', 'ma', 'mg', 'ms', 'mt', 'pa', 'pb', 'pe', 'pi',
+  'pr', 'rj', 'rn', 'ro', 'rr', 'rs', 'sc', 'se', 'sp', 'to',
+  'acre', 'alagoas', 'amapa', 'amazonas', 'bahia', 'ceara', 'distrito federal', 'espirito santo', 'goias',
+  'maranhao', 'mato grosso', 'mato grosso do sul', 'minas gerais', 'para', 'paraiba', 'parana', 'pernambuco',
+  'piaui', 'rio de janeiro', 'rio grande do norte', 'rio grande do sul', 'rondonia', 'roraima', 'santa catarina',
+  'sao paulo', 'sergipe', 'tocantins'
+]);
 
-  for (const endpoint of endpoints) {
+function isLikelyBrazilAddress(churchSettings = {}) {
+  const stateHint = stripDiacritics(churchSettings.state).toLowerCase();
+  const zipDigits = normalize(churchSettings.zipCode).replace(/\D/g, '');
+  return brazilStateHints.has(stateHint) || zipDigits.length === 8;
+}
+
+function buildGeocodeCandidates(input) {
+  if (typeof input === 'string') {
+    const query = normalize(input);
+    return query ? [{ q: query }] : [];
+  }
+
+  const churchSettings = hydrateChurchSettings(input || {});
+  const street = normalize(churchSettings.address);
+  const city = normalize(churchSettings.city);
+  const state = normalize(churchSettings.state);
+  const zipCode = normalize(churchSettings.zipCode);
+  const formatted = formatChurchAddress(churchSettings);
+  const likelyBrazil = isLikelyBrazilAddress(churchSettings);
+  const country = likelyBrazil ? 'Brazil' : '';
+  const countryCodes = likelyBrazil ? 'br' : '';
+  const candidates = [];
+  const seen = new Set();
+
+  const addCandidate = (candidate) => {
+    const key = JSON.stringify(candidate);
+    if (!seen.has(key)) {
+      seen.add(key);
+      candidates.push(candidate);
+    }
+  };
+
+  const structured = {};
+  if (street) structured.street = street;
+  if (city) structured.city = city;
+  if (state) structured.state = state;
+  if (zipCode) structured.postalcode = zipCode;
+  if (country) structured.country = country;
+  if (Object.keys(structured).length > 0) {
+    addCandidate({ structured, countrycodes: countryCodes });
+  }
+
+  if (formatted) {
+    addCandidate({
+      q: country ? `${formatted}, ${country}` : formatted,
+      countrycodes: countryCodes
+    });
+  }
+
+  const cityStateZip = [city, state, zipCode, country].filter(Boolean).join(', ');
+  if (cityStateZip) {
+    addCandidate({
+      q: cityStateZip,
+      countrycodes: countryCodes
+    });
+  }
+
+  if (zipCode) {
+    addCandidate({
+      q: country ? `${zipCode}, ${country}` : zipCode,
+      countrycodes: countryCodes
+    });
+  }
+
+  return candidates;
+}
+
+async function geocodeAddress(input) {
+  const candidates = buildGeocodeCandidates(input);
+  if (!candidates.length) return null;
+
+  const endpoint = 'https://nominatim.openstreetmap.org/search';
+
+  for (const candidate of candidates) {
     try {
       const url = new URL(endpoint);
-      url.searchParams.set('q', query);
-      url.searchParams.set('format', 'json');
+      url.searchParams.set('format', 'jsonv2');
       url.searchParams.set('limit', '1');
+      url.searchParams.set('addressdetails', '1');
+      if (candidate.countrycodes) {
+        url.searchParams.set('countrycodes', candidate.countrycodes);
+      }
+
+      if (candidate.q) {
+        url.searchParams.set('q', candidate.q);
+      } else {
+        Object.entries(candidate.structured || {}).forEach(([key, value]) => {
+          if (value) {
+            url.searchParams.set(key, value);
+          }
+        });
+      }
 
       const response = await fetchWithTimeout(url.toString(), {
         method: 'GET',
         headers: {
           Accept: 'application/json',
+          'Accept-Language': 'pt-BR,en-US;q=0.8',
           'User-Agent': 'ChurchCRM/1.0 (Visitation Map Base)'
         }
       });
 
-      if (!response.ok) {
-        continue;
-      }
+      if (!response.ok) continue;
 
       const rows = await response.json();
-      if (!Array.isArray(rows) || rows.length === 0) {
-        continue;
-      }
+      if (!Array.isArray(rows) || rows.length === 0) continue;
 
       const first = rows[0] || {};
       const lat = normalizeLatitude(first.lat);
       const lng = normalizeLongitude(first.lon);
-
-      if (!lat || !lng) {
-        continue;
-      }
+      if (!lat || !lng) continue;
 
       return { lat, lng };
     } catch {
-      // Try the next endpoint.
+      // Try the next candidate.
     }
   }
 
@@ -1307,7 +1393,7 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       return res.redirect(`/settings/church?${params.toString()}`);
     }
 
-    const geocoded = await geocodeAddress(geocodeQuery);
+    const geocoded = await geocodeAddress(churchSettings);
     if (geocoded) {
       churchSettings.mapLat = geocoded.lat;
       churchSettings.mapLng = geocoded.lng;
@@ -1336,6 +1422,7 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
 
       const currentVisitation = hydrateVisitationSettings((data.settings || {}).visitation, data.people || []);
       const resolvedChurchSettings = hydrateChurchSettings(data.settings.church);
+      const resolvedChurchAddress = formatChurchAddress(resolvedChurchSettings);
       data.settings.visitation = {
         ...currentVisitation,
         mapCenterMode: 'church',
@@ -1343,7 +1430,7 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
         profilePersonId: '',
         churchProfile: {
           name: resolvedChurchSettings.name,
-          address: geocodeQuery,
+          address: resolvedChurchAddress,
           lat: resolvedChurchSettings.mapLat,
           lng: resolvedChurchSettings.mapLng
         }
@@ -2944,24 +3031,13 @@ app.post('/api/visitation/settings', async (req, res, next) => {
       acc[entry.id] = entry;
       return acc;
     }, {});
-    const incomingChurchProfile =
-      req.body.churchProfile && typeof req.body.churchProfile === 'object'
-        ? req.body.churchProfile
-        : {};
-
-    const churchSettings = hydrateChurchSettings((current.settings || {}).church);
+    let churchSettings = hydrateChurchSettings((current.settings || {}).church);
     let mapSettings = mergeVisitationWithChurchSettings(
       hydrateVisitationSettings(
         {
           mapCenterMode: req.body.mapCenterMode,
           mapCenterZoom: req.body.mapCenterZoom,
-          profilePersonId: req.body.profilePersonId,
-          churchProfile: {
-            name: req.body.churchName || incomingChurchProfile.name,
-            address: req.body.churchAddress || incomingChurchProfile.address,
-            lat: req.body.churchLat || incomingChurchProfile.lat,
-            lng: req.body.churchLng || incomingChurchProfile.lng
-          }
+          profilePersonId: req.body.profilePersonId
         },
         people
       ),
@@ -2969,13 +3045,29 @@ app.post('/api/visitation/settings', async (req, res, next) => {
     );
 
     if (mapSettings.mapCenterMode === 'church') {
-      const hasChurchCoordinates = Boolean(
-        mapSettings.churchProfile.lat && mapSettings.churchProfile.lng
-      );
+      const churchAddress = formatChurchAddress(churchSettings);
+      mapSettings = {
+        ...mapSettings,
+        mapCenterMode: 'church',
+        profilePersonId: '',
+        churchProfile: {
+          ...mapSettings.churchProfile,
+          name: churchSettings.name || mapSettings.churchProfile.name,
+          address: churchAddress || mapSettings.churchProfile.address,
+          lat: churchSettings.mapLat,
+          lng: churchSettings.mapLng
+        }
+      };
 
-      if (!hasChurchCoordinates && mapSettings.churchProfile.address) {
-        const geocoded = await geocodeAddress(mapSettings.churchProfile.address);
+      const hasChurchCoordinates = Boolean(mapSettings.churchProfile.lat && mapSettings.churchProfile.lng);
+      if (!hasChurchCoordinates && churchAddress) {
+        const geocoded = await geocodeAddress(churchSettings);
         if (geocoded) {
+          churchSettings = {
+            ...churchSettings,
+            mapLat: geocoded.lat,
+            mapLng: geocoded.lng
+          };
           mapSettings = {
             ...mapSettings,
             churchProfile: {
@@ -2989,7 +3081,7 @@ app.post('/api/visitation/settings', async (req, res, next) => {
 
       if (!mapSettings.churchProfile.lat || !mapSettings.churchProfile.lng) {
         return res.status(400).json({
-          error: 'Set church address (or church lat/lng) so map base can be located.'
+          error: 'Set church address so map base can be located.'
         });
       }
     }
@@ -3007,6 +3099,13 @@ app.post('/api/visitation/settings', async (req, res, next) => {
 
     await updateData((data) => {
       data.settings = data.settings || {};
+      if (churchSettings.mapLat && churchSettings.mapLng) {
+        const existingChurchSettings = hydrateChurchSettings((data.settings || {}).church);
+        data.settings.church = {
+          ...existingChurchSettings,
+          ...churchSettings
+        };
+      }
       data.settings.visitation = mapSettings;
       return data;
     });

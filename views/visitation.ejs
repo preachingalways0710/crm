@@ -91,6 +91,9 @@
             <div class="street-draft-list" id="streetDraftList">
               <p class="text-secondary mb-0">Switch Draw Mode to Street Layer and draw green areas inside the section.</p>
             </div>
+            <p class="text-secondary mt-2 mb-0">
+              Steps: draw the red section first, switch to green street mode, draw street blocks, then save section.
+            </p>
           </div>
           <div class="col-12 d-flex align-items-end gap-2">
             <button type="submit" class="btn btn-primary">Save Section</button>
@@ -138,6 +141,6 @@
 <script>
   window.__VISITATION_BOOTSTRAP__ = <%- JSON.stringify({ sections, folders, mapSettings, mapProfiles }) %>;
 </script>
-<script src="/static/js/visitation.js"></script>
+<script src="/static/js/visitation.js?v=20260421"></script>
 
 <%- include('partials-footer') %>
