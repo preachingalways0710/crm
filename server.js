@@ -37,6 +37,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 }
 });
+const PEOPLE_DIRECTORY_PAGE_SIZE = 25;
 
 function id() {
   return crypto.randomUUID();
@@ -133,7 +134,7 @@ function normalizeLongitude(value) {
   return normalizeCoordinate(value, { min: -180, max: 180 });
 }
 
-function normalizeMapZoom(value, fallback = 15) {
+function normalizeMapZoom(value, fallback = 16) {
   const parsed = Number.parseInt(normalize(value), 10);
   if (!Number.isInteger(parsed)) return fallback;
   return Math.min(20, Math.max(3, parsed));
@@ -204,7 +205,7 @@ function hydrateVisitationSettings(settings, people = []) {
 
   return {
     mapCenterMode: mode,
-    mapCenterZoom: normalizeMapZoom(raw.mapCenterZoom, 15),
+    mapCenterZoom: normalizeMapZoom(raw.mapCenterZoom, 16),
     profilePersonId: peopleIds.has(profilePersonId) ? profilePersonId : '',
     churchProfile: {
       name: normalize(churchProfile.name),
@@ -1359,7 +1360,7 @@ app.get('/settings/church', async (req, res, next) => {
     res.render('church-settings', {
       activeTab: 'church_settings',
       churchSettings,
-      mapCenterZoom: visitationSettings.mapCenterZoom || 15,
+      mapCenterZoom: visitationSettings.mapCenterZoom || 16,
       saveStatus,
       geocodeStatus,
       isReadOnly
@@ -1382,7 +1383,7 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       zipCode: req.body.zipCode
     });
 
-    const mapCenterZoom = normalizeMapZoom(req.body.mapCenterZoom, 15);
+    const mapCenterZoom = normalizeMapZoom(req.body.mapCenterZoom, 16);
     const geocodeQuery = formatChurchAddress(churchSettings);
 
     if (!geocodeQuery) {
@@ -1523,6 +1524,48 @@ app.get('/people', async (req, res, next) => {
       );
     }
 
+    const totalFilteredPeople = people.length;
+    const totalPages = Math.max(1, Math.ceil(totalFilteredPeople / PEOPLE_DIRECTORY_PAGE_SIZE));
+    const requestedPage = Number.parseInt(normalize(req.query.page), 10);
+    const currentPage =
+      Number.isInteger(requestedPage) && requestedPage > 0 ? Math.min(requestedPage, totalPages) : 1;
+    const pageStartIndex = (currentPage - 1) * PEOPLE_DIRECTORY_PAGE_SIZE;
+    const pagedPeople = people.slice(pageStartIndex, pageStartIndex + PEOPLE_DIRECTORY_PAGE_SIZE);
+    const pageRangeStart = totalFilteredPeople ? pageStartIndex + 1 : 0;
+    const pageRangeEnd = Math.min(totalFilteredPeople, pageStartIndex + pagedPeople.length);
+
+    const basePaginationParams = new URLSearchParams();
+    if (selectedSmartFilter?.id) {
+      basePaginationParams.set('smartFilter', selectedSmartFilter.id);
+    } else {
+      if (q) basePaginationParams.set('q', q);
+      if (followups === 'open') basePaginationParams.set('followups', followups);
+      if (membershipTypeFilter) basePaginationParams.set('membershipType', membershipTypeFilter);
+      if (tagFilter) basePaginationParams.set('tag', tagFilter);
+    }
+
+    const buildPeoplePageUrl = (pageNumber) => {
+      const params = new URLSearchParams(basePaginationParams.toString());
+      if (pageNumber > 1) {
+        params.set('page', String(pageNumber));
+      } else {
+        params.delete('page');
+      }
+      const query = params.toString();
+      return query ? `/people?${query}` : '/people';
+    };
+
+    const paginationLinks = [];
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+    for (let pageNumber = startPage; pageNumber <= endPage; pageNumber += 1) {
+      paginationLinks.push({
+        number: pageNumber,
+        isCurrent: pageNumber === currentPage,
+        url: buildPeoplePageUrl(pageNumber)
+      });
+    }
+
     const tagDisplayMap = new Map();
     data.people.forEach((person) => {
       normalizePersonTags(person.tags).forEach((tag) => {
@@ -1551,7 +1594,15 @@ app.get('/people', async (req, res, next) => {
 
     res.render('people', {
       activeTab: 'people',
-      people,
+      people: pagedPeople,
+      totalFilteredPeople,
+      currentPage,
+      totalPages,
+      pageRangeStart,
+      pageRangeEnd,
+      paginationLinks,
+      previousPageUrl: currentPage > 1 ? buildPeoplePageUrl(currentPage - 1) : '',
+      nextPageUrl: currentPage < totalPages ? buildPeoplePageUrl(currentPage + 1) : '',
       q,
       followups,
       membershipTypeFilter,
@@ -3633,5 +3684,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Church dashboard running on http://localhost:${PORT}`);
+  console.log(`Dashboard running on http://localhost:${PORT}`);
 });

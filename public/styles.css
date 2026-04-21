@@ -73,6 +73,32 @@ body {
   min-height: 78vh;
 }
 
+@media (min-width: 992px) {
+  .visitation-layout {
+    --bs-gutter-x: 0.45rem;
+  }
+
+  #visitationSidebarCol {
+    flex: 0 0 max(11%, 210px);
+    max-width: max(11%, 210px);
+  }
+
+  #visitationMainCol {
+    flex: 0 0 calc(100% - max(11%, 210px));
+    max-width: calc(100% - max(11%, 210px));
+    padding-right: 0.1rem;
+  }
+
+  #visitationMainCol .visitation-map-card {
+    margin-right: 0;
+  }
+
+  #visitationMainCol .visitation-map-card .card-body {
+    padding-right: 0.4rem;
+    padding-left: 0.45rem;
+  }
+}
+
 #listWrap {
   min-height: 240px;
 }

@@ -159,7 +159,7 @@ function normalizeMapSettings(settings) {
 
   return {
     mapCenterMode: mode,
-    mapCenterZoom: Number.isInteger(zoomRaw) ? Math.min(20, Math.max(3, zoomRaw)) : 15,
+    mapCenterZoom: Number.isInteger(zoomRaw) ? Math.min(20, Math.max(3, zoomRaw)) : 16,
     profilePersonId: safeText(settings?.profilePersonId),
     churchProfile: {
       name: safeText(settings?.churchProfile?.name),
@@ -172,7 +172,7 @@ function normalizeMapSettings(settings) {
 
 function resolveConfiguredMapBase() {
   const settings = normalizeMapSettings(state.mapSettings);
-  const zoom = Math.max(settings.mapCenterZoom || 15, 15);
+  const zoom = Math.max(settings.mapCenterZoom || 16, 16);
 
   if (settings.mapCenterMode === 'profile') {
     const profile = state.mapProfiles.find((entry) => entry.id === settings.profilePersonId);
@@ -189,7 +189,7 @@ function resolveConfiguredMapBase() {
     return { lat: churchLat, lng: churchLng, zoom, hasConfiguredMapBase: true };
   }
 
-  return { lat: 47.6062, lng: -122.3321, zoom: 14, hasConfiguredMapBase: false };
+  return { lat: 47.6062, lng: -122.3321, zoom: 15, hasConfiguredMapBase: false };
 }
 
 function buildMapBaseLayer(mode) {
@@ -533,7 +533,7 @@ function renderMapSettingsForm() {
   const zoomInput = document.getElementById('mapCenterZoom');
 
   modeInput.value = settings.mapCenterMode;
-  zoomInput.value = settings.mapCenterZoom || 15;
+  zoomInput.value = settings.mapCenterZoom || 16;
   churchNameInput.value = settings.churchProfile.name || '';
   churchAddressInput.value = settings.churchProfile.address || '';
   churchLatInput.value = settings.churchProfile.lat || '';
