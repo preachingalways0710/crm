@@ -133,7 +133,7 @@ function normalizeLongitude(value) {
   return normalizeCoordinate(value, { min: -180, max: 180 });
 }
 
-function normalizeMapZoom(value, fallback = 13) {
+function normalizeMapZoom(value, fallback = 15) {
   const parsed = Number.parseInt(normalize(value), 10);
   if (!Number.isInteger(parsed)) return fallback;
   return Math.min(20, Math.max(3, parsed));
@@ -204,7 +204,7 @@ function hydrateVisitationSettings(settings, people = []) {
 
   return {
     mapCenterMode: mode,
-    mapCenterZoom: normalizeMapZoom(raw.mapCenterZoom, 13),
+    mapCenterZoom: normalizeMapZoom(raw.mapCenterZoom, 15),
     profilePersonId: peopleIds.has(profilePersonId) ? profilePersonId : '',
     churchProfile: {
       name: normalize(churchProfile.name),
@@ -1359,7 +1359,7 @@ app.get('/settings/church', async (req, res, next) => {
     res.render('church-settings', {
       activeTab: 'church_settings',
       churchSettings,
-      mapCenterZoom: visitationSettings.mapCenterZoom || 13,
+      mapCenterZoom: visitationSettings.mapCenterZoom || 15,
       saveStatus,
       geocodeStatus,
       isReadOnly
@@ -1382,7 +1382,7 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       zipCode: req.body.zipCode
     });
 
-    const mapCenterZoom = normalizeMapZoom(req.body.mapCenterZoom, 13);
+    const mapCenterZoom = normalizeMapZoom(req.body.mapCenterZoom, 15);
     const geocodeQuery = formatChurchAddress(churchSettings);
 
     if (!geocodeQuery) {

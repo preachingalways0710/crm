@@ -159,7 +159,7 @@ function normalizeMapSettings(settings) {
 
   return {
     mapCenterMode: mode,
-    mapCenterZoom: Number.isInteger(zoomRaw) ? Math.min(20, Math.max(3, zoomRaw)) : 13,
+    mapCenterZoom: Number.isInteger(zoomRaw) ? Math.min(20, Math.max(3, zoomRaw)) : 15,
     profilePersonId: safeText(settings?.profilePersonId),
     churchProfile: {
       name: safeText(settings?.churchProfile?.name),
@@ -172,7 +172,7 @@ function normalizeMapSettings(settings) {
 
 function resolveConfiguredMapBase() {
   const settings = normalizeMapSettings(state.mapSettings);
-  const zoom = settings.mapCenterZoom || 13;
+  const zoom = Math.max(settings.mapCenterZoom || 15, 15);
 
   if (settings.mapCenterMode === 'profile') {
     const profile = state.mapProfiles.find((entry) => entry.id === settings.profilePersonId);
@@ -189,7 +189,7 @@ function resolveConfiguredMapBase() {
     return { lat: churchLat, lng: churchLng, zoom, hasConfiguredMapBase: true };
   }
 
-  return { lat: 47.6062, lng: -122.3321, zoom: 11, hasConfiguredMapBase: false };
+  return { lat: 47.6062, lng: -122.3321, zoom: 14, hasConfiguredMapBase: false };
 }
 
 function buildMapBaseLayer(mode) {
@@ -474,6 +474,8 @@ function renderStreetDraftList() {
 
 function setMode(mode) {
   state.mode = mode === 'list' ? 'list' : 'map';
+  const mainCol = document.getElementById('visitationMainCol');
+  const secondaryCards = document.querySelectorAll('.visitation-secondary-card');
 
   document.querySelectorAll('[data-mode]').forEach((button) => {
     const isActive = button.getAttribute('data-mode') === state.mode;
@@ -483,6 +485,12 @@ function setMode(mode) {
 
   document.getElementById('mapWrap').classList.toggle('d-none', state.mode !== 'map');
   document.getElementById('listWrap').classList.toggle('d-none', state.mode !== 'list');
+  secondaryCards.forEach((card) => {
+    card.classList.toggle('d-none', state.mode === 'map');
+  });
+  if (mainCol) {
+    mainCol.classList.toggle('visitation-map-focus', state.mode === 'map');
+  }
 
   if (state.mode === 'map' && map) {
     setTimeout(() => map.invalidateSize(), 120);
@@ -525,7 +533,7 @@ function renderMapSettingsForm() {
   const zoomInput = document.getElementById('mapCenterZoom');
 
   modeInput.value = settings.mapCenterMode;
-  zoomInput.value = settings.mapCenterZoom || 13;
+  zoomInput.value = settings.mapCenterZoom || 15;
   churchNameInput.value = settings.churchProfile.name || '';
   churchAddressInput.value = settings.churchProfile.address || '';
   churchLatInput.value = settings.churchProfile.lat || '';

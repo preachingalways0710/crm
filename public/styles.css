@@ -14,7 +14,8 @@ body {
 }
 
 #map {
-  min-height: 560px;
+  min-height: 72vh;
+  height: 72vh;
   border: 1px solid #d8dee9;
   border-radius: 8px;
 }
@@ -61,6 +62,15 @@ body {
 
 .leaflet-draw.leaflet-control {
   display: none;
+}
+
+#visitationMainCol.visitation-map-focus .visitation-map-card .card-body {
+  padding: 0.65rem;
+}
+
+#visitationMainCol.visitation-map-focus #map {
+  height: calc(100vh - 9.8rem);
+  min-height: 78vh;
 }
 
 #listWrap {
@@ -255,7 +265,8 @@ body {
   }
 
   #map {
-    min-height: 440px;
+    min-height: 65vh;
+    height: 65vh;
   }
 
   .map-top-controls {
@@ -270,15 +281,26 @@ body {
   .map-top-right .form-control {
     min-width: 100%;
   }
+
+  #visitationMainCol.visitation-map-focus #map {
+    height: calc(100vh - 8.5rem);
+    min-height: 70vh;
+  }
 }
 
 @media (max-width: 576px) {
   #map {
-    min-height: 360px;
+    min-height: 60vh;
+    height: 60vh;
   }
 
   .territory-card {
     padding: 0.75rem;
+  }
+
+  #visitationMainCol.visitation-map-focus #map {
+    height: calc(100vh - 7.6rem);
+    min-height: 64vh;
   }
 
   .street-draft-item {

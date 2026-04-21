@@ -31,7 +31,7 @@
   </div>
 
   <div class="col-12 col-lg-9" id="visitationMainCol">
-    <div class="card mb-3">
+    <div class="card mb-3 visitation-secondary-card">
       <div class="card-header"><h3 class="card-title">Territory Builder</h3></div>
       <div class="card-body">
         <p class="text-secondary mb-3">Draw map areas, organize by folder, and track claim status + checklist. Base map location comes from Church Settings.</p>
@@ -103,7 +103,7 @@
       </div>
     </div>
 
-    <div class="card mb-3">
+    <div class="card mb-3 visitation-secondary-card">
       <div class="card-header"><h3 class="card-title">Field Claim Mode (Mobile)</h3></div>
       <div class="card-body">
         <div class="row g-2">
@@ -121,7 +121,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card visitation-map-card">
       <div class="card-header d-flex justify-content-between align-items-center">
         <h3 class="card-title mb-0">Territory Board</h3>
         <span class="badge bg-azure-lt" id="activeFolderLabel">All Folders</span>
@@ -168,6 +168,6 @@
 <script>
   window.__VISITATION_BOOTSTRAP__ = <%- JSON.stringify({ sections, folders, markers, mapSettings, mapProfiles }) %>;
 </script>
-<script src="/static/js/visitation.js?v=20260421b"></script>
+<script src="/static/js/visitation.js?v=20260421c"></script>
 
 <%- include('partials-footer') %>
