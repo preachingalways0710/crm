@@ -128,24 +128,22 @@
           </tbody>
         </table>
       </div>
-      <% if (totalPages > 1) { %>
-        <div class="card-footer d-flex align-items-center">
-          <p class="m-0 text-secondary">Page <%= currentPage %> of <%= totalPages %> · <%= pageSize %> per page</p>
-          <ul class="pagination m-0 ms-auto">
-            <li class="page-item <%= previousPageUrl ? '' : 'disabled' %>">
-              <a class="page-link" href="<%= previousPageUrl || '#' %>" aria-disabled="<%= previousPageUrl ? 'false' : 'true' %>">Previous</a>
+      <div class="card-footer d-flex align-items-center">
+        <p class="m-0 text-secondary">Page <%= currentPage %> of <%= totalPages %> · <%= pageSize %> per page</p>
+        <ul class="pagination m-0 ms-auto">
+          <li class="page-item <%= previousPageUrl ? '' : 'disabled' %>">
+            <a class="page-link" href="<%= previousPageUrl || '#' %>" aria-disabled="<%= previousPageUrl ? 'false' : 'true' %>">Previous</a>
+          </li>
+          <% paginationLinks.forEach((pageLink) => { %>
+            <li class="page-item <%= pageLink.isCurrent ? 'active' : '' %>">
+              <a class="page-link" href="<%= pageLink.url %>"><%= pageLink.number %></a>
             </li>
-            <% paginationLinks.forEach((pageLink) => { %>
-              <li class="page-item <%= pageLink.isCurrent ? 'active' : '' %>">
-                <a class="page-link" href="<%= pageLink.url %>"><%= pageLink.number %></a>
-              </li>
-            <% }) %>
-            <li class="page-item <%= nextPageUrl ? '' : 'disabled' %>">
-              <a class="page-link" href="<%= nextPageUrl || '#' %>" aria-disabled="<%= nextPageUrl ? 'false' : 'true' %>">Next</a>
-            </li>
-          </ul>
-        </div>
-      <% } %>
+          <% }) %>
+          <li class="page-item <%= nextPageUrl ? '' : 'disabled' %>">
+            <a class="page-link" href="<%= nextPageUrl || '#' %>" aria-disabled="<%= nextPageUrl ? 'false' : 'true' %>">Next</a>
+          </li>
+        </ul>
+      </div>
     </div>
   </div>
 
