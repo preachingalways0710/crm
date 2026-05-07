@@ -14,7 +14,7 @@
     <div class="alert alert-info m-3 mb-0" role="alert">That follow-up was already sent to Todoist.</div>
   <% } %>
   <% if (todoistStatus === 'failed') { %>
-    <div class="alert alert-warning m-3 mb-0" role="alert">Could not send task to Todoist right now.</div>
+    <div class="alert alert-warning m-3 mb-0" role="alert">Could not send task to Todoist right now<%= todoistHttp ? ` (HTTP ${todoistHttp})` : '' %><%= todoistError ? `: ${todoistError}` : '.' %></div>
   <% } %>
   <% if (todoistStatus === 'failed_auth') { %>
     <div class="alert alert-warning m-3 mb-0" role="alert">Todoist rejected authentication. Recheck the API token in Integrations.</div>
@@ -45,6 +45,7 @@
             <input type="hidden" name="status" value="<%= status %>" />
             <input type="hidden" name="stage" value="<%= stage %>" />
             <input type="hidden" name="view" value="<%= view %>" />
+            <input type="hidden" name="q" value="<%= q || '' %>" />
             <button class="btn btn-outline-secondary btn-sm" type="submit">Send Overdue To Todoist</button>
           </form>
           <form method="post" action="/followups/bulk/todoist">
@@ -52,6 +53,7 @@
             <input type="hidden" name="status" value="<%= status %>" />
             <input type="hidden" name="stage" value="<%= stage %>" />
             <input type="hidden" name="view" value="<%= view %>" />
+            <input type="hidden" name="q" value="<%= q || '' %>" />
             <button class="btn btn-outline-secondary btn-sm" type="submit">Send Due Soon To Todoist</button>
           </form>
         </div>
@@ -77,13 +79,17 @@
           <% }) %>
         </select>
       </div>
+      <div class="col-12 col-md-4">
+        <label class="form-label">Search</label>
+        <input class="form-control" name="q" value="<%= q || '' %>" placeholder="Search person, task, notes..." />
+      </div>
       <div class="col-12 col-md-2 d-flex align-items-end">
         <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
       </div>
       <div class="col-12">
         <div class="btn-group" role="group" aria-label="Follow-up view">
-          <a class="btn btn-sm <%= view === 'table' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=table">Table</a>
-          <a class="btn btn-sm <%= view === 'board' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=board">Board</a>
+          <a class="btn btn-sm <%= view === 'table' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=table&q=<%= qEncoded %>">Table</a>
+          <a class="btn btn-sm <%= view === 'board' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=board&q=<%= qEncoded %>">Board</a>
         </div>
       </div>
     </form>
@@ -114,7 +120,7 @@
               <td><%= item.title %></td>
               <td>
                 <form method="post" action="/followups/<%= item.id %>/stage" class="d-flex gap-2">
-                  <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                  <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                   <select class="form-select form-select-sm" name="stage" onchange="this.form.submit()">
                     <% followUpStages.forEach((stageOption) => { %>
                       <option value="<%= stageOption.value %>" <%= item.stage === stageOption.value ? 'selected' : '' %>><%= stageOption.label %></option>
@@ -131,25 +137,25 @@
                   <% if (item.todoistSynced) { %>
                     <button class="btn btn-outline-secondary btn-sm mb-2 w-100" type="button" disabled>Already In Todoist</button>
                     <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2" onsubmit="return confirm('Resend this follow-up to Todoist? This creates another task.');">
-                      <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                      <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                       <input type="hidden" name="forceResend" value="1" />
                       <button class="btn btn-outline-warning btn-sm w-100" type="submit">Resend To Todoist</button>
                     </form>
                   <% } else { %>
                     <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2">
-                      <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                      <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                       <button class="btn btn-outline-secondary btn-sm w-100" type="submit">Send To Todoist</button>
                     </form>
                   <% } %>
                 <% } %>
                 <% if (item.status === 'completed') { %>
                   <form method="post" action="/followups/<%= item.id %>/reopen">
-                    <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                    <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                     <button class="btn btn-outline-secondary btn-sm" type="submit">Reopen</button>
                   </form>
                 <% } else { %>
                   <form method="post" action="/followups/<%= item.id %>/complete" class="d-flex gap-2">
-                    <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                    <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                     <input class="form-control form-control-sm" name="completionNote" placeholder="Completion note" />
                     <button class="btn btn-primary btn-sm" type="submit">Complete</button>
                   </form>
@@ -191,21 +197,21 @@
                     <% if (todoistEnabled) { %>
                       <% if (item.todoistSynced) { %>
                         <button class="btn btn-outline-secondary btn-sm w-100 mb-2" type="button" disabled>Already In Todoist</button>
-                        <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2" onsubmit="return confirm('Resend this follow-up to Todoist? This creates another task.');">
-                          <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                    <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2" onsubmit="return confirm('Resend this follow-up to Todoist? This creates another task.');">
+                          <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                           <input type="hidden" name="forceResend" value="1" />
                           <button class="btn btn-outline-warning btn-sm w-100" type="submit">Resend To Todoist</button>
                         </form>
                       <% } else { %>
                         <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2">
-                          <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                          <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                           <button class="btn btn-outline-secondary btn-sm w-100" type="submit">Send To Todoist</button>
                         </form>
                       <% } %>
                     <% } %>
 
                     <form method="post" action="/followups/<%= item.id %>/stage" class="mb-2">
-                      <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                      <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                       <select class="form-select form-select-sm" name="stage" onchange="this.form.submit()">
                         <% followUpStages.forEach((stageOption) => { %>
                           <option value="<%= stageOption.value %>" <%= item.stage === stageOption.value ? 'selected' : '' %>><%= stageOption.label %></option>
@@ -215,12 +221,12 @@
 
                     <% if (item.status === 'completed') { %>
                       <form method="post" action="/followups/<%= item.id %>/reopen">
-                        <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                        <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                         <button class="btn btn-outline-secondary btn-sm w-100" type="submit">Reopen</button>
                       </form>
                     <% } else { %>
                       <form method="post" action="/followups/<%= item.id %>/complete">
-                        <input type="hidden" name="returnTo" value="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>" />
+                        <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
                         <input class="form-control form-control-sm mb-2" name="completionNote" placeholder="Completion note" />
                         <button class="btn btn-primary btn-sm w-100" type="submit">Complete</button>
                       </form>

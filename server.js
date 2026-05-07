@@ -1100,12 +1100,13 @@ function buildGoogleCalendarFollowUpUrl(person, followUp) {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
-function buildFollowupsReturnTo(status, stage, view) {
+function buildFollowupsReturnTo(status, stage, view, q = '') {
   const params = new URLSearchParams({
     status: normalize(status) || 'open',
     stage: normalize(stage) || 'all',
     view: normalize(view) === 'board' ? 'board' : 'table'
   });
+  if (normalize(q)) params.set('q', normalize(q));
   return `/followups?${params.toString()}`;
 }
 
@@ -1141,6 +1142,13 @@ async function createTodoistTask(token, payload) {
   }
 
   if (!response.ok) {
+    let apiError = '';
+    try {
+      const parsed = JSON.parse(responseText || '{}');
+      apiError = normalize(parsed.error || parsed.message || '');
+    } catch {
+      apiError = normalize(responseText).slice(0, 140);
+    }
     const status = Number(response.status) || 0;
     const reason =
       status === 401 || status === 403
@@ -1148,7 +1156,7 @@ async function createTodoistTask(token, payload) {
         : status === 400 || status === 404
           ? 'failed_config'
           : 'failed';
-    return { ok: false, reason };
+    return { ok: false, reason, status, apiError };
   }
 
   return { ok: true, task: JSON.parse(responseText || '{}') };
@@ -2417,9 +2425,12 @@ app.get('/followups', async (req, res, next) => {
     const status = normalize(req.query.status) || 'open';
     const stage = normalizeFollowUpStageFilter(req.query.stage);
     const view = normalize(req.query.view) === 'board' ? 'board' : 'table';
+    const q = normalize(req.query.q).toLowerCase();
     const todoistStatus = normalize(req.query.todoist);
     const todoistCount = normalizePositiveInt(req.query.todoistCount, 0);
     const todoistSkipped = normalizePositiveInt(req.query.todoistSkipped, 0);
+    const todoistHttp = normalizePositiveInt(req.query.todoistHttp, 0);
+    const todoistError = normalize(req.query.todoistError);
 
     const peopleById = data.people.reduce((acc, person) => {
       acc[person.id] = person;
@@ -2467,6 +2478,14 @@ app.get('/followups', async (req, res, next) => {
     if (stage !== 'all') {
       queue = queue.filter((item) => item.stage === stage);
     }
+    if (q) {
+      queue = queue.filter((item) =>
+        [item.personName, item.title, item.notes, item.dueDate, followUpStageLabels[item.stage] || '']
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
+      );
+    }
 
     const board = followUpStages.map((stageOption) => ({
       ...stageOption,
@@ -2490,7 +2509,12 @@ app.get('/followups', async (req, res, next) => {
       todoistEnabled: Boolean(integrationSettings.todoistApiToken),
       todoistStatus,
       todoistCount,
-      todoistSkipped
+      todoistSkipped,
+      todoistHttp,
+      todoistError,
+      q: normalize(req.query.q),
+      qEncoded: encodeURIComponent(normalize(req.query.q)),
+      followupsReturnTo: buildFollowupsReturnTo(status, stage, view, req.query.q)
     });
   } catch (err) {
     next(err);
@@ -2596,7 +2620,12 @@ app.post('/followups/:followUpId/todoist', async (req, res, next) => {
     const taskCreate = await createTodoistTask(token, payload);
     if (!taskCreate.ok) {
       const separator = returnTo.includes('?') ? '&' : '?';
-      return res.redirect(`${returnTo}${separator}todoist=${taskCreate.reason}`);
+      const params = new URLSearchParams({
+        todoist: taskCreate.reason,
+        todoistHttp: String(taskCreate.status || 0),
+        ...(taskCreate.apiError ? { todoistError: taskCreate.apiError } : {})
+      });
+      return res.redirect(`${returnTo}${separator}${params.toString()}`);
     }
 
     const createdTask = taskCreate.task || {};
@@ -2623,7 +2652,7 @@ app.post('/followups/bulk/todoist', async (req, res, next) => {
     const status = normalize(req.body.status) || 'open';
     const stage = normalize(req.body.stage) || 'all';
     const view = normalize(req.body.view) === 'board' ? 'board' : 'table';
-    const returnTo = buildFollowupsReturnTo(status, stage, view);
+    const returnTo = buildFollowupsReturnTo(status, stage, view, req.body.q);
 
     if (!['overdue', 'due_soon'].includes(bucket)) {
       return res.redirect(returnTo);
@@ -2689,7 +2718,12 @@ app.post('/followups/bulk/todoist', async (req, res, next) => {
         });
         sent += 1;
       } else if (taskCreate.reason === 'failed_auth') {
-        return res.redirect(`${returnTo}&todoist=failed_auth`);
+        const params = new URLSearchParams({
+          todoist: 'failed_auth',
+          todoistHttp: String(taskCreate.status || 0),
+          ...(taskCreate.apiError ? { todoistError: taskCreate.apiError } : {})
+        });
+        return res.redirect(`${returnTo}&${params.toString()}`);
       }
     }
 
