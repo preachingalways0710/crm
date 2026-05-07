@@ -25,6 +25,9 @@
   <% if (todoistStatus === 'missing_token') { %>
     <div class="alert alert-warning m-3 mb-0" role="alert">Set your Todoist API token in Church Settings first.</div>
   <% } %>
+  <% if (todoistStatus === 'use_post_action') { %>
+    <div class="alert alert-info m-3 mb-0" role="alert">Please use the Send To Todoist button again from the queue.</div>
+  <% } %>
   <div class="card-header">
     <h3 class="card-title">Global Follow-up Queue</h3>
     <div class="card-actions">

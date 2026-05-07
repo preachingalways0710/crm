@@ -1454,6 +1454,29 @@ function isPublicPath(pathname) {
   );
 }
 
+function safePathFromReferer(referer) {
+  const raw = normalize(referer);
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    const path = `${url.pathname || ''}${url.search || ''}`;
+    return path.startsWith('/') ? path : '';
+  } catch {
+    return '';
+  }
+}
+
+function resolveAuthReturnTo(req) {
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    const path = normalize(req.originalUrl) || '/people';
+    return path.startsWith('/') ? path : '/people';
+  }
+
+  const refererPath = safePathFromReferer(req.get('referer'));
+  if (refererPath) return refererPath;
+  return '/people';
+}
+
 app.use((req, res, next) => {
   res.locals.authEnabled = isAuthEnabled();
   res.locals.isAuthenticated = Boolean(req.session?.isAuthenticated);
@@ -1466,7 +1489,7 @@ app.use((req, res, next) => {
     return next();
   }
 
-  const returnTo = encodeURIComponent(req.originalUrl || '/people');
+  const returnTo = encodeURIComponent(resolveAuthReturnTo(req));
   return res.redirect(`/login?returnTo=${returnTo}`);
 });
 
@@ -2644,6 +2667,10 @@ app.post('/followups/:followUpId/todoist', async (req, res, next) => {
   } catch (err) {
     return next(err);
   }
+});
+
+app.get('/followups/:followUpId/todoist', (req, res) => {
+  return res.redirect('/followups?status=open&stage=all&view=table&todoist=use_post_action');
 });
 
 app.post('/followups/bulk/todoist', async (req, res, next) => {
