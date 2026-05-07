@@ -941,9 +941,19 @@ async function readPessoasAttendanceRows() {
   };
 }
 
-const membershipTypes = ['Prospect', 'Member', 'Voting Member'];
+const membershipTypes = ['Convidado', 'Frequentador', 'Membro', 'Membro Votante'];
 const genderOptions = ['Male', 'Female', 'Unspecified'];
 const serviceTypes = ['wed', 'sun_am', 'sun_pm'];
+const followUpContactMethods = [
+  { value: 'visit', label: 'Visit' },
+  { value: 'gift', label: 'Gift' },
+  { value: 'spiritual_conversation', label: 'Spiritual Conversation' }
+];
+const followUpContactMethodValues = followUpContactMethods.map((entry) => entry.value);
+const followUpContactMethodLabels = followUpContactMethods.reduce((acc, entry) => {
+  acc[entry.value] = entry.label;
+  return acc;
+}, {});
 const followUpStages = [
   { value: 'new_visitor', label: 'New Visitor' },
   { value: 'contacted', label: 'Contacted' },
@@ -971,11 +981,33 @@ function normalizePositiveInt(value, fallback = 0) {
 }
 
 function membershipCadenceDefaultMonths(membershipType) {
-  const normalizedType = normalize(membershipType).toLowerCase();
-  if (normalizedType === 'member' || normalizedType === 'voting member') {
+  const normalizedType = normalizeMembershipType(membershipType).toLowerCase();
+  if (normalizedType === 'membro' || normalizedType === 'membro votante') {
     return 1;
   }
   return 0;
+}
+
+function normalizeMembershipType(value) {
+  const raw = normalize(value).toLowerCase();
+  const map = {
+    prospect: 'Convidado',
+    guest: 'Convidado',
+    convidado: 'Convidado',
+    frequentador: 'Frequentador',
+    attendee: 'Frequentador',
+    member: 'Membro',
+    membro: 'Membro',
+    'voting member': 'Membro Votante',
+    'membro votante': 'Membro Votante'
+  };
+  const resolved = map[raw] || normalize(value);
+  return membershipTypes.includes(resolved) ? resolved : 'Convidado';
+}
+
+function normalizeFollowUpContactMethod(value) {
+  const method = normalize(value);
+  return followUpContactMethodValues.includes(method) ? method : 'visit';
 }
 
 function normalizeFollowUpCadenceMonths(value, membershipType = '') {
@@ -1005,8 +1037,9 @@ function syncFollowUpsForPerson(data, person, now = new Date()) {
   const personFollowUps = data.followUps.filter((entry) => entry.personId === person.id);
   const nowIso = now.toISOString();
 
-  const isProspect = normalize(person.membershipType).toLowerCase() === 'prospect';
-  if (isProspect) {
+  const normalizedMembership = normalizeMembershipType(person.membershipType).toLowerCase();
+  const isGuest = normalizedMembership === 'convidado';
+  if (isGuest) {
     const anchorDate = toIsoDate(person.createdAt || nowIso) || todayIso;
     guestFollowUpSequenceDays.forEach((offsetDays) => {
       const autoKey = `guest-seq-${offsetDays}`;
@@ -1018,6 +1051,7 @@ function syncFollowUpsForPerson(data, person, now = new Date()) {
         title: `Guest follow-up (${offsetDays} day${offsetDays === 1 ? '' : 's'})`,
         dueDate: addDays(anchorDate, offsetDays),
         notes: '',
+        contactMethod: 'visit',
         status: 'open',
         stage: 'new_visitor',
         createdAt: nowIso,
@@ -1062,6 +1096,7 @@ function syncFollowUpsForPerson(data, person, now = new Date()) {
     title: `Regular member visit (${cadenceMonths} month cadence)`,
     dueDate: todayIso,
     notes: '',
+    contactMethod: 'visit',
     status: 'open',
     stage: 'connected',
     createdAt: nowIso,
@@ -1100,14 +1135,20 @@ function buildGoogleCalendarFollowUpUrl(person, followUp) {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
-function buildFollowupsReturnTo(status, stage, view, q = '') {
+function buildFollowupsReturnTo(status, stage, view, q = '', due = 'all') {
   const params = new URLSearchParams({
     status: normalize(status) || 'open',
     stage: normalize(stage) || 'all',
-    view: normalize(view) === 'board' ? 'board' : 'table'
+    view: normalize(view) === 'board' ? 'board' : 'table',
+    due: normalizeDueFilter(due)
   });
   if (normalize(q)) params.set('q', normalize(q));
   return `/followups?${params.toString()}`;
+}
+
+function normalizeDueFilter(value) {
+  const due = normalize(value);
+  return ['all', 'overdue', 'due_soon', 'upcoming'].includes(due) ? due : 'all';
 }
 
 function isFollowUpTodoistSynced(followUp) {
@@ -1301,7 +1342,8 @@ function normalizeFollowUpStageFilter(value) {
 }
 
 function normalizeMembershipTypeFilter(value) {
-  const membershipType = normalize(value);
+  if (!normalize(value)) return '';
+  const membershipType = normalizeMembershipType(value);
   return membershipTypes.includes(membershipType) ? membershipType : '';
 }
 
@@ -1386,6 +1428,8 @@ app.locals.genderOptions = genderOptions;
 app.locals.serviceTypeLabels = serviceTypeLabels;
 app.locals.followUpStages = followUpStages;
 app.locals.followUpStageLabels = followUpStageLabels;
+app.locals.followUpContactMethods = followUpContactMethods;
+app.locals.followUpContactMethodLabels = followUpContactMethodLabels;
 
 function isAuthEnabled() {
   return Boolean(getAdminAuthPassword() || getUserAuthPassword());
@@ -1549,7 +1593,7 @@ function mapImportRow(row) {
     state: csvField(row, ['state']),
     zipCode: csvField(row, ['zip', 'zip_code', 'zip code']),
     tags: parseTagsInput(csvField(row, ['tags', 'labels', 'label'])),
-    membershipType,
+    membershipType: normalizeMembershipType(membershipType),
     joinedAt,
     createdAt,
     baptismDate,
@@ -1607,7 +1651,7 @@ async function importPeopleRows(rows) {
         state: row.state || '',
         zipCode: row.zipCode || '',
         tags: row.tags || [],
-        membershipType: row.membershipType || '',
+        membershipType: normalizeMembershipType(row.membershipType),
         joinedAt: row.joinedAt || '',
         createdAt: row.createdAt || '',
         baptismDate: row.baptismDate || '',
@@ -1832,6 +1876,7 @@ app.get('/people', async (req, res, next) => {
 
     let people = sortByName(data.people).map((person) => ({
       ...enrichPerson(person),
+      membershipType: normalizeMembershipType(person.membershipType),
       tags: normalizePersonTags(person.tags),
       openFollowUps: openFollowUpsByPerson[person.id] || 0
     }));
@@ -1858,7 +1903,7 @@ app.get('/people', async (req, res, next) => {
     }
 
     if (membershipTypeFilter) {
-      people = people.filter((person) => normalize(person.membershipType) === membershipTypeFilter);
+      people = people.filter((person) => normalizeMembershipType(person.membershipType) === membershipTypeFilter);
     }
 
     if (tagFilterLower) {
@@ -1985,7 +2030,7 @@ app.get('/people/new', async (req, res, next) => {
         phone: normalize(req.query.phone),
         email: normalize(req.query.email),
         gender: normalize(req.query.gender),
-        membershipType: normalize(req.query.membershipType),
+        membershipType: normalizeMembershipType(req.query.membershipType),
         birthday: normalize(req.query.birthday),
         sectionId: normalize(req.query.sectionId),
         tags: normalize(req.query.tags),
@@ -2009,7 +2054,7 @@ app.post('/people/filters', async (req, res, next) => {
       name: req.body.name,
       q: req.body.q,
       followups: req.body.followups,
-      membershipType: req.body.membershipType,
+      membershipType: normalizeMembershipType(req.body.membershipType),
       tag: req.body.tag
     });
 
@@ -2069,7 +2114,8 @@ app.get('/people/:id', async (req, res, next) => {
       .filter((entry) => entry.personId === person.id)
       .map((entry) => ({
         ...entry,
-        stage: normalizeFollowUpStage(entry.stage)
+        stage: normalizeFollowUpStage(entry.stage),
+        contactMethod: normalizeFollowUpContactMethod(entry.contactMethod)
       }))
       .sort((a, b) => new Date(a.dueDate || a.createdAt) - new Date(b.dueDate || b.createdAt));
 
@@ -2092,7 +2138,7 @@ app.get('/people/:id', async (req, res, next) => {
       .map((entry) => ({
         id: entry.id,
         name: entry.name,
-        membershipType: entry.membershipType || 'Prospect'
+        membershipType: normalizeMembershipType(entry.membershipType)
       }));
 
     const timeline = buildPersonTimeline(person, followUps, visits);
@@ -2101,6 +2147,7 @@ app.get('/people/:id', async (req, res, next) => {
       activeTab: 'people',
       person: {
         ...enrichPerson(personWithRelationships),
+        membershipType: normalizeMembershipType(personWithRelationships.membershipType),
         tags: normalizePersonTags(person.tags),
         followUpCadenceMonths: normalizeFollowUpCadenceMonths(
           personWithRelationships.followUpCadenceMonths,
@@ -2133,7 +2180,7 @@ app.post('/people', async (req, res, next) => {
       notes: req.body.notes?.trim() || '',
       gender: req.body.gender || '',
       ageGroup: req.body.ageGroup || '',
-      membershipType: req.body.membershipType || '',
+      membershipType: normalizeMembershipType(req.body.membershipType),
       occupation: req.body.occupation || '',
       language: req.body.language || '',
       maritalStatus: req.body.maritalStatus || '',
@@ -2147,7 +2194,10 @@ app.post('/people', async (req, res, next) => {
       mapLat: normalizeLatitude(req.body.mapLat),
       mapLng: normalizeLongitude(req.body.mapLng),
       tags: parseTagsInput(req.body.tags),
-      followUpCadenceMonths: normalizeFollowUpCadenceMonths(req.body.followUpCadenceMonths, req.body.membershipType),
+      followUpCadenceMonths: normalizeFollowUpCadenceMonths(
+        req.body.followUpCadenceMonths,
+        normalizeMembershipType(req.body.membershipType)
+      ),
       spouseIds: [],
       parentIds: [],
       childIds: [],
@@ -2239,7 +2289,7 @@ app.post('/people/:id', async (req, res, next) => {
         write('notes', (value) => value?.trim() || '');
         write('gender', (value) => value || '');
         write('ageGroup', (value) => value || '');
-        write('membershipType', (value) => value || '');
+        write('membershipType', (value) => normalizeMembershipType(value));
         write('followUpCadenceMonths', (value) =>
           normalizeFollowUpCadenceMonths(value, req.body.membershipType || person.membershipType)
         );
@@ -2346,6 +2396,7 @@ app.post('/people/:id/followups', async (req, res, next) => {
         title,
         dueDate: req.body.dueDate || '',
         notes: req.body.notes?.trim() || '',
+        contactMethod: normalizeFollowUpContactMethod(req.body.contactMethod),
         status: 'open',
         stage: normalizeFollowUpStage(req.body.stage),
         createdAt: nowIso,
@@ -2467,6 +2518,7 @@ app.get('/followups', async (req, res, next) => {
     const status = normalize(req.query.status) || 'open';
     const stage = normalizeFollowUpStageFilter(req.query.stage);
     const view = normalize(req.query.view) === 'board' ? 'board' : 'table';
+    const due = normalizeDueFilter(req.query.due);
     const q = normalize(req.query.q).toLowerCase();
     const todoistStatus = normalize(req.query.todoist);
     const todoistCount = normalizePositiveInt(req.query.todoistCount, 0);
@@ -2498,6 +2550,7 @@ app.get('/followups', async (req, res, next) => {
         return {
           ...item,
           stage: normalizeFollowUpStage(item.stage),
+          contactMethod: normalizeFollowUpContactMethod(item.contactMethod),
           dueDate: dueDate || '',
           dueBucket,
           googleCalendarUrl: buildGoogleCalendarFollowUpUrl(person, item),
@@ -2523,7 +2576,14 @@ app.get('/followups', async (req, res, next) => {
     }
     if (q) {
       queue = queue.filter((item) =>
-        [item.personName, item.title, item.notes, item.dueDate, followUpStageLabels[item.stage] || '']
+        [
+          item.personName,
+          item.title,
+          item.notes,
+          item.dueDate,
+          followUpStageLabels[item.stage] || '',
+          followUpContactMethodLabels[item.contactMethod] || ''
+        ]
           .join(' ')
           .toLowerCase()
           .includes(q)
@@ -2540,6 +2600,9 @@ app.get('/followups', async (req, res, next) => {
       dueSoon: queue.filter((item) => item.dueBucket === 'due_soon'),
       upcoming: queue.filter((item) => item.dueBucket === 'upcoming')
     };
+    if (due !== 'all') {
+      queue = queue.filter((item) => item.dueBucket === due);
+    }
 
     res.render('followups', {
       activeTab: 'followups',
@@ -2547,6 +2610,7 @@ app.get('/followups', async (req, res, next) => {
       status,
       stage,
       view,
+      due,
       board,
       dueGroups,
       todoistEnabled: Boolean(integrationSettings.todoistApiToken),
@@ -2558,7 +2622,7 @@ app.get('/followups', async (req, res, next) => {
       todoistEndpoint,
       q: normalize(req.query.q),
       qEncoded: encodeURIComponent(normalize(req.query.q)),
-      followupsReturnTo: buildFollowupsReturnTo(status, stage, view, req.query.q)
+      followupsReturnTo: buildFollowupsReturnTo(status, stage, view, req.query.q, due)
     });
   } catch (err) {
     next(err);
@@ -2701,7 +2765,7 @@ app.post('/followups/bulk/todoist', async (req, res, next) => {
     const status = normalize(req.body.status) || 'open';
     const stage = normalize(req.body.stage) || 'all';
     const view = normalize(req.body.view) === 'board' ? 'board' : 'table';
-    const returnTo = buildFollowupsReturnTo(status, stage, view, req.body.q);
+    const returnTo = buildFollowupsReturnTo(status, stage, view, req.body.q, req.body.due);
 
     if (!['overdue', 'due_soon'].includes(bucket)) {
       return res.redirect(returnTo);

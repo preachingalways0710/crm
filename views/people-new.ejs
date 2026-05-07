@@ -33,7 +33,7 @@
         <label class="form-label">Membership Type</label>
         <select class="form-select" name="membershipType">
           <% membershipTypes.forEach((type) => { %>
-            <option value="<%= type %>" <%= (formData?.membershipType || 'Prospect') === type ? 'selected' : '' %>><%= type %></option>
+            <option value="<%= type %>" <%= (formData?.membershipType || 'Convidado') === type ? 'selected' : '' %>><%= type %></option>
           <% }) %>
         </select>
       </div>

@@ -63,7 +63,7 @@
           <input type="hidden" name="tag" value="<%= tagFilter || '' %>" />
           <div class="col-12 col-md-4">
             <label class="form-label">Save This Smart Filter</label>
-            <input class="form-control" name="name" placeholder="Ex: Open Prospect Follow-ups" required />
+            <input class="form-control" name="name" placeholder="Ex: Follow-ups Convidados Abertos" required />
           </div>
           <div class="col-12 col-md-2 d-flex align-items-end">
             <button type="submit" class="btn btn-outline-primary w-100">Save Filter</button>
@@ -106,7 +106,7 @@
                 </td>
                 <td><%= person.birthday ? formatDateDMY(person.birthday) : '-' %></td>
                 <td>
-                  <span class="badge bg-azure-lt"><%= person.membershipType || 'Prospect' %></span>
+                  <span class="badge bg-azure-lt"><%= person.membershipType || 'Convidado' %></span>
                 </td>
                 <td>
                   <% if ((person.tags || []).length) { %>

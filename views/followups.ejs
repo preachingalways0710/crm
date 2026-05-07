@@ -37,9 +37,10 @@
   <% if (status !== 'completed') { %>
     <div class="card-body border-bottom">
       <div class="d-flex flex-wrap gap-2">
-        <span class="badge bg-red-lt">Overdue: <%= dueGroups.overdue.length %></span>
-        <span class="badge bg-orange-lt">Due soon: <%= dueGroups.dueSoon.length %></span>
-        <span class="badge bg-blue-lt">Upcoming: <%= dueGroups.upcoming.length %></span>
+        <a class="badge <%= due === 'overdue' ? 'bg-red' : 'bg-red-lt' %> text-decoration-none" href="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>&q=<%= qEncoded %>&due=overdue">Overdue: <%= dueGroups.overdue.length %></a>
+        <a class="badge <%= due === 'due_soon' ? 'bg-orange' : 'bg-orange-lt' %> text-decoration-none" href="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>&q=<%= qEncoded %>&due=due_soon">Due soon: <%= dueGroups.dueSoon.length %></a>
+        <a class="badge <%= due === 'upcoming' ? 'bg-blue' : 'bg-blue-lt' %> text-decoration-none" href="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>&q=<%= qEncoded %>&due=upcoming">Upcoming: <%= dueGroups.upcoming.length %></a>
+        <a class="badge <%= due === 'all' ? 'bg-secondary' : 'bg-secondary-lt' %> text-decoration-none" href="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>&q=<%= qEncoded %>&due=all">All</a>
       </div>
       <% if (todoistEnabled) { %>
         <div class="d-flex flex-wrap gap-2 mt-3">
@@ -49,6 +50,7 @@
             <input type="hidden" name="stage" value="<%= stage %>" />
             <input type="hidden" name="view" value="<%= view %>" />
             <input type="hidden" name="q" value="<%= q || '' %>" />
+            <input type="hidden" name="due" value="<%= due || 'all' %>" />
             <button class="btn btn-outline-secondary btn-sm" type="submit">Send Overdue To Todoist</button>
           </form>
           <form method="post" action="/followups/bulk/todoist">
@@ -57,10 +59,12 @@
             <input type="hidden" name="stage" value="<%= stage %>" />
             <input type="hidden" name="view" value="<%= view %>" />
             <input type="hidden" name="q" value="<%= q || '' %>" />
+            <input type="hidden" name="due" value="<%= due || 'all' %>" />
             <button class="btn btn-outline-secondary btn-sm" type="submit">Send Due Soon To Todoist</button>
           </form>
         </div>
       <% } %>
+      <div class="text-secondary small mt-2">Todoist sync is one-way right now: sending from CRM creates tasks in Todoist, but completing in Todoist does not auto-complete in CRM.</div>
     </div>
   <% } %>
   <div class="card-body border-bottom">
@@ -86,13 +90,14 @@
         <label class="form-label">Search</label>
         <input class="form-control" name="q" value="<%= q || '' %>" placeholder="Search person, task, notes..." />
       </div>
+      <input type="hidden" name="due" value="<%= due || 'all' %>" />
       <div class="col-12 col-md-2 d-flex align-items-end">
         <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
       </div>
       <div class="col-12">
         <div class="btn-group" role="group" aria-label="Follow-up view">
-          <a class="btn btn-sm <%= view === 'table' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=table&q=<%= qEncoded %>">Table</a>
-          <a class="btn btn-sm <%= view === 'board' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=board&q=<%= qEncoded %>">Board</a>
+          <a class="btn btn-sm <%= view === 'table' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=table&q=<%= qEncoded %>&due=<%= due || 'all' %>">Table</a>
+          <a class="btn btn-sm <%= view === 'board' ? 'btn-primary' : 'btn-outline-primary' %>" href="/followups?status=<%= status %>&stage=<%= stage %>&view=board&q=<%= qEncoded %>&due=<%= due || 'all' %>">Board</a>
         </div>
       </div>
     </form>
@@ -105,6 +110,7 @@
           <tr>
             <th>Person</th>
             <th>Task</th>
+            <th>Contact</th>
             <th>Stage</th>
             <th>Due Date</th>
             <th>Status</th>
@@ -114,13 +120,14 @@
         </thead>
         <tbody>
           <% if (!queue.length) { %>
-            <tr><td colspan="7" class="text-secondary">No follow-ups found for this filter.</td></tr>
+            <tr><td colspan="8" class="text-secondary">No follow-ups found for this filter.</td></tr>
           <% } %>
 
           <% queue.forEach((item) => { %>
             <tr>
               <td><a href="<%= item.personLink %>"><%= item.personName %></a></td>
               <td><%= item.title %></td>
+              <td><%= followUpContactMethodLabels[item.contactMethod] || 'Visit' %></td>
               <td>
                 <form method="post" action="/followups/<%= item.id %>/stage" class="d-flex gap-2">
                   <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
@@ -194,6 +201,7 @@
                       <span class="badge <%= item.status === 'completed' ? 'bg-green-lt' : 'bg-orange-lt' %>"><%= item.status %></span>
                     </div>
                     <div><strong><%= item.title %></strong></div>
+                    <div class="text-secondary small">Contact: <%= followUpContactMethodLabels[item.contactMethod] || 'Visit' %></div>
                     <div class="text-secondary small">Due: <%= item.dueDate || '-' %></div>
                     <div class="text-secondary small mb-2"><%= item.notes || 'No notes' %></div>
                     <a class="btn btn-outline-secondary btn-sm w-100 mb-2" href="<%= item.googleCalendarUrl %>" target="_blank" rel="noopener noreferrer">Google Calendar</a>

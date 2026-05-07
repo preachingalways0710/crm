@@ -12,7 +12,7 @@
         <h3 class="m-0"><%= person.name %></h3>
         <p class="text-secondary mb-2"><%= person.email || 'No email' %></p>
         <span class="badge bg-green-lt">Active</span>
-        <span class="badge bg-azure-lt"><%= person.membershipType || 'Prospect' %></span>
+        <span class="badge bg-azure-lt"><%= person.membershipType || 'Convidado' %></span>
         <% if ((person.tags || []).length) { %>
           <div class="mt-2 d-flex flex-wrap justify-content-center gap-1">
             <% person.tags.forEach((tag) => { %>
@@ -219,7 +219,7 @@
                   <label class="form-label">Membership Type</label>
                   <select class="form-select" name="membershipType">
                     <% membershipTypes.forEach((type) => { %>
-                      <option value="<%= type %>" <%= (person.membershipType || 'Prospect') === type ? 'selected' : '' %>><%= type %></option>
+                      <option value="<%= type %>" <%= (person.membershipType || 'Convidado') === type ? 'selected' : '' %>><%= type %></option>
                     <% }) %>
                   </select>
                 </div>
@@ -272,6 +272,13 @@
               </select>
             </div>
             <div class="col-12 col-md-2"><label class="form-label">Due Date</label><input class="form-control" name="dueDate" type="date" /></div>
+            <div class="col-12 col-md-3"><label class="form-label">Contact Form</label>
+              <select class="form-select" name="contactMethod">
+                <% followUpContactMethods.forEach((method) => { %>
+                  <option value="<%= method.value %>" <%= method.value === 'visit' ? 'selected' : '' %>><%= method.label %></option>
+                <% }) %>
+              </select>
+            </div>
             <div class="col-12 col-md-3"><label class="form-label">Notes</label><input class="form-control" name="notes" placeholder="Prayer request follow-up" /></div>
             <div class="col-12"><button class="btn btn-primary" type="submit">Add Follow-up</button></div>
           </form>
@@ -282,14 +289,15 @@
         <div class="card-header"><h3 class="card-title">Follow-up Queue</h3></div>
         <div class="table-responsive">
           <table class="table table-vcenter">
-            <thead><tr><th>Task</th><th>Stage</th><th>Due</th><th>Status</th><th>Notes</th><th class="w-1"></th></tr></thead>
+            <thead><tr><th>Task</th><th>Contact</th><th>Stage</th><th>Due</th><th>Status</th><th>Notes</th><th class="w-1"></th></tr></thead>
             <tbody>
               <% if (!followUps.length) { %>
-                <tr><td colspan="6" class="text-secondary">No follow-ups yet.</td></tr>
+                <tr><td colspan="7" class="text-secondary">No follow-ups yet.</td></tr>
               <% } %>
               <% followUps.forEach((item) => { %>
                 <tr>
                   <td><%= item.title %></td>
+                  <td><%= followUpContactMethodLabels[item.contactMethod] || 'Visit' %></td>
                   <td>
                     <form method="post" action="/people/<%= person.id %>/followups/<%= item.id %>/stage" class="d-flex gap-2">
                       <select class="form-select form-select-sm" name="stage" onchange="this.form.submit()">
