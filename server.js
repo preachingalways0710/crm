@@ -171,6 +171,21 @@ function hydrateChurchSettings(settings) {
   };
 }
 
+function hydrateIntegrationSettings(settings) {
+  const raw = settings && typeof settings === 'object' ? settings : {};
+  return {
+    todoistApiToken: normalize(raw.todoistApiToken),
+    todoistProjectId: normalize(raw.todoistProjectId)
+  };
+}
+
+function maskSecret(value) {
+  const raw = normalize(value);
+  if (!raw) return '';
+  if (raw.length <= 8) return '********';
+  return `${raw.slice(0, 4)}••••${raw.slice(-4)}`;
+}
+
 function formatChurchAddress(churchSettings) {
   return [
     normalize(churchSettings?.address),
@@ -947,6 +962,156 @@ const serviceTypeLabels = {
   sun_pm: 'Sunday PM'
 };
 const familyRelationshipTypes = ['spouse', 'parent', 'child'];
+const guestFollowUpSequenceDays = [1, 7, 30];
+
+function normalizePositiveInt(value, fallback = 0) {
+  const parsed = Number.parseInt(normalize(value), 10);
+  if (!Number.isInteger(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
+function membershipCadenceDefaultMonths(membershipType) {
+  const normalizedType = normalize(membershipType).toLowerCase();
+  if (normalizedType === 'member' || normalizedType === 'voting member') {
+    return 1;
+  }
+  return 0;
+}
+
+function normalizeFollowUpCadenceMonths(value, membershipType = '') {
+  const parsed = normalizePositiveInt(value, -1);
+  if (parsed === -1) return membershipCadenceDefaultMonths(membershipType);
+  if ([0, 1, 2].includes(parsed)) return parsed;
+  return membershipCadenceDefaultMonths(membershipType);
+}
+
+function addDays(isoDate, days) {
+  const base = new Date(isoDate);
+  if (Number.isNaN(base.getTime())) return '';
+  base.setDate(base.getDate() + days);
+  return base.toISOString().slice(0, 10);
+}
+
+function addMonths(isoDate, months) {
+  const base = new Date(isoDate);
+  if (Number.isNaN(base.getTime())) return '';
+  base.setMonth(base.getMonth() + months);
+  return base.toISOString().slice(0, 10);
+}
+
+function syncFollowUpsForPerson(data, person, now = new Date()) {
+  if (!person) return;
+  const todayIso = now.toISOString().slice(0, 10);
+  const personFollowUps = data.followUps.filter((entry) => entry.personId === person.id);
+  const nowIso = now.toISOString();
+
+  const isProspect = normalize(person.membershipType).toLowerCase() === 'prospect';
+  if (isProspect) {
+    const anchorDate = toIsoDate(person.createdAt || nowIso) || todayIso;
+    guestFollowUpSequenceDays.forEach((offsetDays) => {
+      const autoKey = `guest-seq-${offsetDays}`;
+      const alreadyExists = personFollowUps.some((entry) => normalize(entry.autoKey) === autoKey);
+      if (alreadyExists) return;
+      data.followUps.push({
+        id: id(),
+        personId: person.id,
+        title: `Guest follow-up (${offsetDays} day${offsetDays === 1 ? '' : 's'})`,
+        dueDate: addDays(anchorDate, offsetDays),
+        notes: '',
+        status: 'open',
+        stage: 'new_visitor',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        stageUpdatedAt: nowIso,
+        completedAt: '',
+        autoType: 'guest_sequence',
+        autoKey
+      });
+    });
+  }
+
+  const cadenceMonths = normalizeFollowUpCadenceMonths(
+    person.followUpCadenceMonths,
+    person.membershipType
+  );
+  if (cadenceMonths <= 0) return;
+
+  const hasOpenRecurring = personFollowUps.some(
+    (entry) => entry.status !== 'completed' && normalize(entry.autoType) === 'member_recurring'
+  );
+  if (hasOpenRecurring) return;
+
+  const lastCompletedRecurring = personFollowUps
+    .filter((entry) => entry.status === 'completed' && normalize(entry.autoType) === 'member_recurring')
+    .sort((a, b) => new Date(b.completedAt || b.updatedAt || b.createdAt) - new Date(a.completedAt || a.updatedAt || a.createdAt))[0];
+  const lastVisit = data.visits
+    .filter((entry) => entry.personId === person.id)
+    .sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt))[0];
+
+  const recurringAnchor =
+    toIsoDate(lastCompletedRecurring?.completedAt) ||
+    toIsoDate(lastVisit?.date || lastVisit?.createdAt) ||
+    todayIso;
+  const nextDueDate = addMonths(recurringAnchor, cadenceMonths) || todayIso;
+
+  if (nextDueDate > todayIso) return;
+
+  data.followUps.push({
+    id: id(),
+    personId: person.id,
+    title: `Regular member visit (${cadenceMonths} month cadence)`,
+    dueDate: todayIso,
+    notes: '',
+    status: 'open',
+    stage: 'connected',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    stageUpdatedAt: nowIso,
+    completedAt: '',
+    autoType: 'member_recurring'
+  });
+}
+
+function syncAllAutoFollowUps(data) {
+  const now = new Date();
+  (data.people || []).forEach((person) => syncFollowUpsForPerson(data, person, now));
+}
+
+function toGoogleDateParam(isoDate) {
+  const iso = toIsoDate(isoDate);
+  if (!iso) return '';
+  return iso.replace(/-/g, '');
+}
+
+function buildGoogleCalendarFollowUpUrl(person, followUp) {
+  const title = normalize(followUp?.title) || 'Follow-up';
+  const personName = normalize(person?.name) || 'Member';
+  const details = normalize(followUp?.notes)
+    ? `Person: ${personName}\n\nNotes: ${normalize(followUp.notes)}`
+    : `Person: ${personName}`;
+  const dueDate = toGoogleDateParam(followUp?.dueDate) || toGoogleDateParam(new Date().toISOString().slice(0, 10));
+  const endDate = dueDate ? toGoogleDateParam(addDays(`${dueDate.slice(0, 4)}-${dueDate.slice(4, 6)}-${dueDate.slice(6, 8)}`, 1)) : '';
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `${title} - ${personName}`,
+    details,
+    dates: `${dueDate}/${endDate || dueDate}`
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function buildFollowupsReturnTo(status, stage, view) {
+  const params = new URLSearchParams({
+    status: normalize(status) || 'open',
+    stage: normalize(stage) || 'all',
+    view: normalize(view) === 'board' ? 'board' : 'table'
+  });
+  return `/followups?${params.toString()}`;
+}
+
+function isFollowUpTodoistSynced(followUp) {
+  return Boolean(normalize(followUp?.todoistTaskId));
+}
 
 function normalizeFamilyRelationshipType(value) {
   const type = normalize(value);
@@ -1431,6 +1596,7 @@ app.get('/settings/church', async (req, res, next) => {
   try {
     const data = await readData();
     const churchSettings = hydrateChurchSettings((data.settings || {}).church);
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
     const saveStatus = normalize(req.query.saved) === '1' ? 'saved' : '';
     const geocodeStatus = normalize(req.query.geocode);
     const isReadOnly = !isSessionAdmin(req);
@@ -1438,6 +1604,8 @@ app.get('/settings/church', async (req, res, next) => {
     res.render('church-settings', {
       activeTab: 'church_settings',
       churchSettings,
+      integrationSettings,
+      maskedTodoistToken: maskSecret(integrationSettings.todoistApiToken),
       saveStatus,
       geocodeStatus,
       isReadOnly
@@ -1481,6 +1649,10 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
 
     await updateData((data) => {
       data.settings = data.settings || {};
+      data.settings.integrations = hydrateIntegrationSettings({
+        todoistApiToken: req.body.todoistApiToken,
+        todoistProjectId: req.body.todoistProjectId
+      });
       const previousChurchSettings = hydrateChurchSettings((data.settings || {}).church);
 
       if (churchSettings.mapLat && churchSettings.mapLng) {
@@ -1533,6 +1705,10 @@ app.get('/', (req, res) => {
 
 app.get('/people', async (req, res, next) => {
   try {
+    await updateData((state) => {
+      syncAllAutoFollowUps(state);
+      return state;
+    });
     const data = await readData();
     const savedPeopleFilters = ((data.settings || {}).peopleSavedFilters || []).map((entry) =>
       normalizeSmartPeopleFilter(entry)
@@ -1783,6 +1959,10 @@ app.post('/people/filters/:filterId/delete', async (req, res, next) => {
 
 app.get('/people/:id', async (req, res, next) => {
   try {
+    await updateData((state) => {
+      syncAllAutoFollowUps(state);
+      return state;
+    });
     const data = await readData();
     const person = data.people.find((entry) => entry.id === req.params.id);
 
@@ -1830,7 +2010,11 @@ app.get('/people/:id', async (req, res, next) => {
       activeTab: 'people',
       person: {
         ...enrichPerson(personWithRelationships),
-        tags: normalizePersonTags(person.tags)
+        tags: normalizePersonTags(person.tags),
+        followUpCadenceMonths: normalizeFollowUpCadenceMonths(
+          personWithRelationships.followUpCadenceMonths,
+          personWithRelationships.membershipType
+        )
       },
       tab: currentTab,
       followUps,
@@ -1872,6 +2056,7 @@ app.post('/people', async (req, res, next) => {
       mapLat: normalizeLatitude(req.body.mapLat),
       mapLng: normalizeLongitude(req.body.mapLng),
       tags: parseTagsInput(req.body.tags),
+      followUpCadenceMonths: normalizeFollowUpCadenceMonths(req.body.followUpCadenceMonths, req.body.membershipType),
       spouseIds: [],
       parentIds: [],
       childIds: [],
@@ -1907,6 +2092,7 @@ app.post('/people', async (req, res, next) => {
       }
 
       data.people.push(person);
+      syncFollowUpsForPerson(data, person);
       return data;
     });
 
@@ -1963,6 +2149,9 @@ app.post('/people/:id', async (req, res, next) => {
         write('gender', (value) => value || '');
         write('ageGroup', (value) => value || '');
         write('membershipType', (value) => value || '');
+        write('followUpCadenceMonths', (value) =>
+          normalizeFollowUpCadenceMonths(value, req.body.membershipType || person.membershipType)
+        );
         write('occupation', (value) => value || '');
         write('language', (value) => value || '');
         write('maritalStatus', (value) => value || '');
@@ -1977,6 +2166,7 @@ app.post('/people/:id', async (req, res, next) => {
         write('mapLng', (value) => normalizeLongitude(value));
         write('tags', (value) => parseTagsInput(value));
         person.updatedAt = new Date().toISOString();
+        syncFollowUpsForPerson(data, person);
       }
 
       return data;
@@ -2090,8 +2280,14 @@ app.post('/people/:id/followups/:followUpId/complete', async (req, res, next) =>
       if (row) {
         row.stage = normalizeFollowUpStage(row.stage);
         row.status = 'completed';
+        const completionNote = normalize(req.body.completionNote);
+        if (completionNote) {
+          row.notes = row.notes ? `${row.notes}\n[Completion] ${completionNote}` : `[Completion] ${completionNote}`;
+        }
         row.completedAt = new Date().toISOString();
         row.updatedAt = new Date().toISOString();
+        const person = data.people.find((entry) => entry.id === row.personId);
+        syncFollowUpsForPerson(data, person);
       }
 
       return data;
@@ -2171,10 +2367,18 @@ app.post('/people/:id/visits', async (req, res, next) => {
 
 app.get('/followups', async (req, res, next) => {
   try {
+    await updateData((state) => {
+      syncAllAutoFollowUps(state);
+      return state;
+    });
     const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
     const status = normalize(req.query.status) || 'open';
     const stage = normalizeFollowUpStageFilter(req.query.stage);
     const view = normalize(req.query.view) === 'board' ? 'board' : 'table';
+    const todoistStatus = normalize(req.query.todoist);
+    const todoistCount = normalizePositiveInt(req.query.todoistCount, 0);
+    const todoistSkipped = normalizePositiveInt(req.query.todoistSkipped, 0);
 
     const peopleById = data.people.reduce((acc, person) => {
       acc[person.id] = person;
@@ -2184,9 +2388,25 @@ app.get('/followups', async (req, res, next) => {
     let queue = data.followUps
       .map((item) => {
         const person = peopleById[item.personId];
+        const dueDate = toIsoDate(item.dueDate);
+        const dueDays = dueDate ? diffDays(new Date(dueDate), new Date()) : null;
+        const dueBucket =
+          item.status === 'completed'
+            ? 'completed'
+            : dueDays === null
+              ? 'upcoming'
+              : dueDays < 0
+                ? 'overdue'
+                : dueDays <= 7
+                  ? 'due_soon'
+                  : 'upcoming';
         return {
           ...item,
           stage: normalizeFollowUpStage(item.stage),
+          dueDate: dueDate || '',
+          dueBucket,
+          googleCalendarUrl: buildGoogleCalendarFollowUpUrl(person, item),
+          todoistSynced: isFollowUpTodoistSynced(item),
           personName: person?.name || 'Unknown person',
           personLink: person ? `/people/${person.id}?tab=followups` : '/people'
         };
@@ -2212,13 +2432,24 @@ app.get('/followups', async (req, res, next) => {
       items: queue.filter((item) => item.stage === stageOption.value)
     }));
 
+    const dueGroups = {
+      overdue: queue.filter((item) => item.dueBucket === 'overdue'),
+      dueSoon: queue.filter((item) => item.dueBucket === 'due_soon'),
+      upcoming: queue.filter((item) => item.dueBucket === 'upcoming')
+    };
+
     res.render('followups', {
       activeTab: 'followups',
       queue,
       status,
       stage,
       view,
-      board
+      board,
+      dueGroups,
+      todoistEnabled: Boolean(integrationSettings.todoistApiToken),
+      todoistStatus,
+      todoistCount,
+      todoistSkipped
     });
   } catch (err) {
     next(err);
@@ -2233,8 +2464,14 @@ app.post('/followups/:followUpId/complete', async (req, res, next) => {
       if (row) {
         row.stage = normalizeFollowUpStage(row.stage);
         row.status = 'completed';
+        const completionNote = normalize(req.body.completionNote);
+        if (completionNote) {
+          row.notes = row.notes ? `${row.notes}\n[Completion] ${completionNote}` : `[Completion] ${completionNote}`;
+        }
         row.completedAt = new Date().toISOString();
         row.updatedAt = new Date().toISOString();
+        const person = data.people.find((entry) => entry.id === row.personId);
+        syncFollowUpsForPerson(data, person);
       }
       return data;
     });
@@ -2281,6 +2518,156 @@ app.post('/followups/:followUpId/stage', async (req, res, next) => {
     res.redirect(returnTo);
   } catch (err) {
     next(err);
+  }
+});
+
+app.post('/followups/:followUpId/todoist', async (req, res, next) => {
+  try {
+    const returnTo = normalize(req.body.returnTo) || '/followups?status=open';
+    const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+    const token = integrationSettings.todoistApiToken;
+
+    if (!token) {
+      const separator = returnTo.includes('?') ? '&' : '?';
+      return res.redirect(`${returnTo}${separator}todoist=missing_token`);
+    }
+
+    const row = data.followUps.find((entry) => entry.id === req.params.followUpId);
+    if (!row) {
+      return res.redirect(returnTo);
+    }
+    const forceResend = normalize(req.body.forceResend) === '1';
+    if (!forceResend && isFollowUpTodoistSynced(row)) {
+      const separator = returnTo.includes('?') ? '&' : '?';
+      return res.redirect(`${returnTo}${separator}todoist=already_sent`);
+    }
+
+    const person = data.people.find((entry) => entry.id === row.personId);
+    const dueDate = toIsoDate(row.dueDate);
+    const payload = {
+      content: `${normalize(row.title) || 'Follow-up'}${person ? ` - ${person.name}` : ''}`,
+      description: normalize(row.notes) || undefined,
+      due_date: dueDate || undefined,
+      project_id: normalize(integrationSettings.todoistProjectId) || undefined
+    };
+
+    const response = await fetch('https://api.todoist.com/rest/v2/tasks', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const separator = returnTo.includes('?') ? '&' : '?';
+      return res.redirect(`${returnTo}${separator}todoist=failed`);
+    }
+
+    const createdTask = await response.json().catch(() => ({}));
+    await updateData((state) => {
+      const target = state.followUps.find((entry) => entry.id === req.params.followUpId);
+      if (target) {
+        target.todoistTaskId = normalize(createdTask.id);
+        target.todoistSyncedAt = new Date().toISOString();
+        target.updatedAt = new Date().toISOString();
+      }
+      return state;
+    });
+
+    const separator = returnTo.includes('?') ? '&' : '?';
+    return res.redirect(`${returnTo}${separator}todoist=${forceResend ? 'resent' : 'sent'}`);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/followups/bulk/todoist', async (req, res, next) => {
+  try {
+    const bucket = normalize(req.body.bucket);
+    const status = normalize(req.body.status) || 'open';
+    const stage = normalize(req.body.stage) || 'all';
+    const view = normalize(req.body.view) === 'board' ? 'board' : 'table';
+    const returnTo = buildFollowupsReturnTo(status, stage, view);
+
+    if (!['overdue', 'due_soon'].includes(bucket)) {
+      return res.redirect(returnTo);
+    }
+
+    const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+    const token = integrationSettings.todoistApiToken;
+    if (!token) {
+      return res.redirect(`${returnTo}&todoist=missing_token`);
+    }
+
+    const peopleById = (data.people || []).reduce((acc, person) => {
+      acc[person.id] = person;
+      return acc;
+    }, {});
+    const today = new Date();
+
+    const candidates = (data.followUps || [])
+      .map((item) => {
+        const dueDate = toIsoDate(item.dueDate);
+        const dueDays = dueDate ? diffDays(new Date(dueDate), today) : null;
+        const dueBucket =
+          item.status === 'completed'
+            ? 'completed'
+            : dueDays === null
+              ? 'upcoming'
+              : dueDays < 0
+                ? 'overdue'
+                : dueDays <= 7
+                  ? 'due_soon'
+                  : 'upcoming';
+        return { ...item, dueDate, dueBucket };
+      })
+      .filter((item) => item.status !== 'completed' && item.dueBucket === bucket);
+
+    let sent = 0;
+    let skipped = 0;
+    for (const row of candidates) {
+      if (isFollowUpTodoistSynced(row)) {
+        skipped += 1;
+        continue;
+      }
+      const person = peopleById[row.personId];
+      const payload = {
+        content: `${normalize(row.title) || 'Follow-up'}${person ? ` - ${person.name}` : ''}`,
+        description: normalize(row.notes) || undefined,
+        due_date: row.dueDate || undefined,
+        project_id: normalize(integrationSettings.todoistProjectId) || undefined
+      };
+
+      const response = await fetch('https://api.todoist.com/rest/v2/tasks', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      if (response.ok) {
+        const createdTask = await response.json().catch(() => ({}));
+        await updateData((state) => {
+          const target = state.followUps.find((entry) => entry.id === row.id);
+          if (target) {
+            target.todoistTaskId = normalize(createdTask.id);
+            target.todoistSyncedAt = new Date().toISOString();
+            target.updatedAt = new Date().toISOString();
+          }
+          return state;
+        });
+        sent += 1;
+      }
+    }
+
+    return res.redirect(`${returnTo}&todoist=bulk_sent&todoistCount=${sent}&todoistSkipped=${skipped}`);
+  } catch (err) {
+    return next(err);
   }
 });
 

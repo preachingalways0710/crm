@@ -39,6 +39,7 @@
           <p class="text-secondary text-uppercase fw-bold mb-2">Sections</p>
           <a class="church-settings-link active" href="#church-details"><i class="bi bi-house-door me-2"></i>Church Details</a>
           <a class="church-settings-link" href="#contact-details"><i class="bi bi-telephone me-2"></i>Contact Details</a>
+          <a class="church-settings-link" href="#integrations"><i class="bi bi-plug me-2"></i>Integrations</a>
           <div class="church-settings-side-note">
             Visitation map is automatically centered from the church address.
           </div>
@@ -91,6 +92,29 @@
             <div class="col-12 col-md-4">
               <label class="form-label">ZIP Code</label>
               <input class="form-control" name="zipCode" value="<%= churchSettings.zipCode || '' %>" placeholder="76800-000" />
+            </div>
+          </div>
+        </div>
+
+        <div class="card church-settings-panel" id="integrations">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h3 class="card-title mb-0">Integrations</h3>
+            <span class="text-secondary"><i class="bi <%= isReadOnly ? 'bi-eye' : 'bi-pencil' %> me-1"></i><%= isReadOnly ? 'View' : 'Edit' %></span>
+          </div>
+          <div class="card-body row g-2">
+            <div class="col-12">
+              <label class="form-label">Todoist API Token</label>
+              <input class="form-control" name="todoistApiToken" value="<%= integrationSettings.todoistApiToken || '' %>" placeholder="Paste Todoist token" />
+              <% if (maskedTodoistToken) { %>
+                <div class="form-hint">Saved token: <%= maskedTodoistToken %></div>
+              <% } %>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label">Todoist Project ID (optional)</label>
+              <input class="form-control" name="todoistProjectId" value="<%= integrationSettings.todoistProjectId || '' %>" placeholder="e.g. 2312345678" />
+            </div>
+            <div class="col-12">
+              <div class="form-hint">Google Calendar uses one-click event links from the Follow-ups page.</div>
             </div>
           </div>
         </div>

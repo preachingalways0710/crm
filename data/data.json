@@ -32,6 +32,10 @@
         "lat": "",
         "lng": ""
       }
+    },
+    "integrations": {
+      "todoistApiToken": "",
+      "todoistProjectId": ""
     }
   }
 }

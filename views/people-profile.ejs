@@ -223,6 +223,14 @@
                     <% }) %>
                   </select>
                 </div>
+                <div class="col-6">
+                  <label class="form-label">Visit Cadence</label>
+                  <select class="form-select" name="followUpCadenceMonths">
+                    <option value="0" <%= Number(person.followUpCadenceMonths || 0) === 0 ? 'selected' : '' %>>Disabled</option>
+                    <option value="1" <%= Number(person.followUpCadenceMonths || 0) === 1 ? 'selected' : '' %>>Every month</option>
+                    <option value="2" <%= Number(person.followUpCadenceMonths || 0) === 2 ? 'selected' : '' %>>Every 2 months</option>
+                  </select>
+                </div>
                 <div class="col-6"><label class="form-label">Section ID</label><input class="form-control" name="sectionId" value="<%= person.sectionId || '' %>" /></div>
                 <div class="col-12"><label class="form-label">Tags (comma separated)</label><input class="form-control" name="tags" value="<%= (person.tags || []).join(', ') %>" placeholder="visitor, youth, choir" /></div>
                 <div class="col-6"><label class="form-label">Occupation</label><input class="form-control" name="occupation" value="<%= person.occupation || '' %>" /></div>
@@ -300,7 +308,10 @@
                     <% if (item.status === 'completed') { %>
                       <form method="post" action="/people/<%= person.id %>/followups/<%= item.id %>/reopen"><button class="btn btn-sm" type="submit">Reopen</button></form>
                     <% } else { %>
-                      <form method="post" action="/people/<%= person.id %>/followups/<%= item.id %>/complete"><button class="btn btn-primary btn-sm" type="submit">Complete</button></form>
+                      <form method="post" action="/people/<%= person.id %>/followups/<%= item.id %>/complete" class="d-flex gap-2">
+                        <input class="form-control form-control-sm" name="completionNote" placeholder="Completion note" />
+                        <button class="btn btn-primary btn-sm" type="submit">Complete</button>
+                      </form>
                     <% } %>
                   </td>
                 </tr>
