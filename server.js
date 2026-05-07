@@ -1113,6 +1113,47 @@ function isFollowUpTodoistSynced(followUp) {
   return Boolean(normalize(followUp?.todoistTaskId));
 }
 
+async function createTodoistTask(token, payload) {
+  const send = async (body) =>
+    fetch('https://api.todoist.com/rest/v2/tasks', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+  let response = await send(payload);
+  let responseText = await response.text();
+
+  // Common failure: invalid project_id. Retry once without it.
+  if (!response.ok && payload.project_id) {
+    const retryPayload = { ...payload };
+    delete retryPayload.project_id;
+    const retry = await send(retryPayload);
+    const retryText = await retry.text();
+    if (retry.ok) {
+      return { ok: true, task: JSON.parse(retryText || '{}') };
+    }
+    response = retry;
+    responseText = retryText;
+  }
+
+  if (!response.ok) {
+    const status = Number(response.status) || 0;
+    const reason =
+      status === 401 || status === 403
+        ? 'failed_auth'
+        : status === 400 || status === 404
+          ? 'failed_config'
+          : 'failed';
+    return { ok: false, reason };
+  }
+
+  return { ok: true, task: JSON.parse(responseText || '{}') };
+}
+
 function normalizeFamilyRelationshipType(value) {
   const type = normalize(value);
   return familyRelationshipTypes.includes(type) ? type : '';
@@ -2552,21 +2593,13 @@ app.post('/followups/:followUpId/todoist', async (req, res, next) => {
       project_id: normalize(integrationSettings.todoistProjectId) || undefined
     };
 
-    const response = await fetch('https://api.todoist.com/rest/v2/tasks', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
+    const taskCreate = await createTodoistTask(token, payload);
+    if (!taskCreate.ok) {
       const separator = returnTo.includes('?') ? '&' : '?';
-      return res.redirect(`${returnTo}${separator}todoist=failed`);
+      return res.redirect(`${returnTo}${separator}todoist=${taskCreate.reason}`);
     }
 
-    const createdTask = await response.json().catch(() => ({}));
+    const createdTask = taskCreate.task || {};
     await updateData((state) => {
       const target = state.followUps.find((entry) => entry.id === req.params.followUpId);
       if (target) {
@@ -2642,16 +2675,9 @@ app.post('/followups/bulk/todoist', async (req, res, next) => {
         project_id: normalize(integrationSettings.todoistProjectId) || undefined
       };
 
-      const response = await fetch('https://api.todoist.com/rest/v2/tasks', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
-      });
-      if (response.ok) {
-        const createdTask = await response.json().catch(() => ({}));
+      const taskCreate = await createTodoistTask(token, payload);
+      if (taskCreate.ok) {
+        const createdTask = taskCreate.task || {};
         await updateData((state) => {
           const target = state.followUps.find((entry) => entry.id === row.id);
           if (target) {
@@ -2662,6 +2688,8 @@ app.post('/followups/bulk/todoist', async (req, res, next) => {
           return state;
         });
         sent += 1;
+      } else if (taskCreate.reason === 'failed_auth') {
+        return res.redirect(`${returnTo}&todoist=failed_auth`);
       }
     }
 
