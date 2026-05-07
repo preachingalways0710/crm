@@ -1115,8 +1115,13 @@ function isFollowUpTodoistSynced(followUp) {
 }
 
 async function createTodoistTask(token, payload) {
-  const send = async (body) =>
-    fetch('https://api.todoist.com/rest/v2/tasks', {
+  const endpoints = [
+    'https://api.todoist.com/api/v1/tasks',
+    'https://api.todoist.com/rest/v2/tasks'
+  ];
+
+  const send = async (url, body) =>
+    fetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1125,20 +1130,35 @@ async function createTodoistTask(token, payload) {
       body: JSON.stringify(body)
     });
 
-  let response = await send(payload);
-  let responseText = await response.text();
+  let response = null;
+  let responseText = '';
+  let endpointUsed = '';
 
-  // Common failure: invalid project_id. Retry once without it.
-  if (!response.ok && payload.project_id) {
-    const retryPayload = { ...payload };
-    delete retryPayload.project_id;
-    const retry = await send(retryPayload);
-    const retryText = await retry.text();
-    if (retry.ok) {
-      return { ok: true, task: JSON.parse(retryText || '{}') };
+  for (const endpoint of endpoints) {
+    endpointUsed = endpoint;
+    response = await send(endpoint, payload);
+    responseText = await response.text();
+    if (response.ok) {
+      return { ok: true, task: JSON.parse(responseText || '{}') };
     }
-    response = retry;
-    responseText = retryText;
+
+    // Common failure: invalid project_id. Retry once without it on the same endpoint.
+    if (payload.project_id) {
+      const retryPayload = { ...payload };
+      delete retryPayload.project_id;
+      const retry = await send(endpoint, retryPayload);
+      const retryText = await retry.text();
+      if (retry.ok) {
+        return { ok: true, task: JSON.parse(retryText || '{}') };
+      }
+      response = retry;
+      responseText = retryText;
+    }
+
+    // Try next endpoint when deprecated or not found.
+    if (![404, 410].includes(Number(response.status) || 0)) {
+      break;
+    }
   }
 
   if (!response.ok) {
@@ -1156,9 +1176,8 @@ async function createTodoistTask(token, payload) {
         : status === 400 || status === 404
           ? 'failed_config'
           : 'failed';
-    return { ok: false, reason, status, apiError };
+    return { ok: false, reason, status, apiError, endpointUsed };
   }
-
   return { ok: true, task: JSON.parse(responseText || '{}') };
 }
 
@@ -2454,6 +2473,7 @@ app.get('/followups', async (req, res, next) => {
     const todoistSkipped = normalizePositiveInt(req.query.todoistSkipped, 0);
     const todoistHttp = normalizePositiveInt(req.query.todoistHttp, 0);
     const todoistError = normalize(req.query.todoistError);
+    const todoistEndpoint = normalize(req.query.todoistEndpoint);
 
     const peopleById = data.people.reduce((acc, person) => {
       acc[person.id] = person;
@@ -2535,6 +2555,7 @@ app.get('/followups', async (req, res, next) => {
       todoistSkipped,
       todoistHttp,
       todoistError,
+      todoistEndpoint,
       q: normalize(req.query.q),
       qEncoded: encodeURIComponent(normalize(req.query.q)),
       followupsReturnTo: buildFollowupsReturnTo(status, stage, view, req.query.q)
@@ -2646,7 +2667,8 @@ app.post('/followups/:followUpId/todoist', async (req, res, next) => {
       const params = new URLSearchParams({
         todoist: taskCreate.reason,
         todoistHttp: String(taskCreate.status || 0),
-        ...(taskCreate.apiError ? { todoistError: taskCreate.apiError } : {})
+        ...(taskCreate.apiError ? { todoistError: taskCreate.apiError } : {}),
+        ...(taskCreate.endpointUsed ? { todoistEndpoint: taskCreate.endpointUsed } : {})
       });
       return res.redirect(`${returnTo}${separator}${params.toString()}`);
     }
@@ -2748,7 +2770,8 @@ app.post('/followups/bulk/todoist', async (req, res, next) => {
         const params = new URLSearchParams({
           todoist: 'failed_auth',
           todoistHttp: String(taskCreate.status || 0),
-          ...(taskCreate.apiError ? { todoistError: taskCreate.apiError } : {})
+          ...(taskCreate.apiError ? { todoistError: taskCreate.apiError } : {}),
+          ...(taskCreate.endpointUsed ? { todoistEndpoint: taskCreate.endpointUsed } : {})
         });
         return res.redirect(`${returnTo}&${params.toString()}`);
       }

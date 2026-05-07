@@ -14,7 +14,7 @@
     <div class="alert alert-info m-3 mb-0" role="alert">That follow-up was already sent to Todoist.</div>
   <% } %>
   <% if (todoistStatus === 'failed') { %>
-    <div class="alert alert-warning m-3 mb-0" role="alert">Could not send task to Todoist right now<%= todoistHttp ? ` (HTTP ${todoistHttp})` : '' %><%= todoistError ? `: ${todoistError}` : '.' %></div>
+    <div class="alert alert-warning m-3 mb-0" role="alert">Could not send task to Todoist right now<%= todoistHttp ? ` (HTTP ${todoistHttp})` : '' %><%= todoistError ? `: ${todoistError}` : '.' %><%= todoistEndpoint ? ` Endpoint: ${todoistEndpoint}` : '' %></div>
   <% } %>
   <% if (todoistStatus === 'failed_auth') { %>
     <div class="alert alert-warning m-3 mb-0" role="alert">Todoist rejected authentication. Recheck the API token in Integrations.</div>
