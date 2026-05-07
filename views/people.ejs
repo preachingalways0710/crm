@@ -97,6 +97,11 @@
             <% people.forEach((person) => { %>
               <tr>
                 <td>
+                  <% if (person.photoUrl) { %>
+                    <div class="mb-1"><span class="avatar avatar-md" style="background-image: url('<%= person.photoUrl %>'); background-size: cover; background-position: center;"></span></div>
+                  <% } else { %>
+                    <div class="mb-1"><span class="avatar avatar-md"><%= person.name?.charAt(0)?.toUpperCase() || '?' %></span></div>
+                  <% } %>
                   <div class="fw-semibold"><%= person.name %></div>
                   <div class="text-secondary">Profile <%= person.profilePercent %>% complete</div>
                 </td>

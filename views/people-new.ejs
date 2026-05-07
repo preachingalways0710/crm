@@ -47,6 +47,10 @@
         <input class="form-control" name="email" type="email" value="<%= formData?.email || '' %>" />
       </div>
       <div class="col-12 col-md-4">
+        <label class="form-label">Photo URL</label>
+        <input class="form-control" name="photoUrl" value="<%= formData?.photoUrl || '' %>" placeholder="https://..." />
+      </div>
+      <div class="col-12 col-md-4">
         <label class="form-label">Birthday (dd/mm/yyyy)</label>
         <input class="form-control" name="birthday" placeholder="27/09/2009" value="<%= formData?.birthday || '' %>" />
       </div>

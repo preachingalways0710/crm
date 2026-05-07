@@ -28,6 +28,9 @@
   <% if (todoistStatus === 'use_post_action') { %>
     <div class="alert alert-info m-3 mb-0" role="alert">Please use the Send To Todoist button again from the queue.</div>
   <% } %>
+  <% if (todoistStatus === 'sync_completed') { %>
+    <div class="alert alert-success m-3 mb-0" role="alert">Synced from Todoist: <%= todoistSyncCount %> follow-ups marked completed, <%= todoistSyncSkipped %> unchanged.</div>
+  <% } %>
   <div class="card-header">
     <h3 class="card-title">Global Follow-up Queue</h3>
     <div class="card-actions">
@@ -44,6 +47,10 @@
       </div>
       <% if (todoistEnabled) { %>
         <div class="d-flex flex-wrap gap-2 mt-3">
+          <form method="post" action="/followups/sync/todoist">
+            <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
+            <button class="btn btn-outline-primary btn-sm" type="submit">Sync From Todoist</button>
+          </form>
           <form method="post" action="/followups/bulk/todoist">
             <input type="hidden" name="bucket" value="overdue" />
             <input type="hidden" name="status" value="<%= status %>" />

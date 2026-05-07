@@ -73,6 +73,7 @@ function calculateAge(birthday) {
 
 function profileCompletion(person) {
   const fields = [
+    'photoUrl',
     'name',
     'phone',
     'email',
@@ -108,6 +109,10 @@ function enrichPerson(person) {
 
 function normalize(value) {
   return (value || '').toString().trim();
+}
+
+function normalizePhotoUrl(value) {
+  return normalizeUrlWithScheme(value);
 }
 
 function normalizePhone(value) {
@@ -1222,6 +1227,27 @@ async function createTodoistTask(token, payload) {
   return { ok: true, task: JSON.parse(responseText || '{}') };
 }
 
+async function getTodoistActiveTask(token, taskId) {
+  const cleanedId = normalize(taskId);
+  if (!cleanedId) return { found: false, status: 0 };
+  const endpoints = [
+    `https://api.todoist.com/api/v1/tasks/${encodeURIComponent(cleanedId)}`,
+    `https://api.todoist.com/rest/v2/tasks/${encodeURIComponent(cleanedId)}`
+  ];
+
+  for (const endpoint of endpoints) {
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (response.ok) return { found: true, status: 200 };
+    if ([404, 410].includes(response.status)) continue;
+    return { found: false, status: response.status };
+  }
+
+  return { found: false, status: 404 };
+}
+
 function normalizeFamilyRelationshipType(value) {
   const type = normalize(value);
   return familyRelationshipTypes.includes(type) ? type : '';
@@ -2040,7 +2066,8 @@ app.get('/people/new', async (req, res, next) => {
         zipCode: normalize(req.query.zipCode),
         mapLat: normalize(req.query.mapLat),
         mapLng: normalize(req.query.mapLng),
-        notes: normalize(req.query.notes)
+        notes: normalize(req.query.notes),
+        photoUrl: normalizePhotoUrl(req.query.photoUrl)
       }
     });
   } catch (err) {
@@ -2187,6 +2214,7 @@ app.post('/people', async (req, res, next) => {
       allergies: req.body.allergies || '',
       emergencyContact: req.body.emergencyContact || '',
       medicalNotes: req.body.medicalNotes || '',
+      photoUrl: normalizePhotoUrl(req.body.photoUrl),
       address: req.body.address || '',
       city: req.body.city || '',
       state: req.body.state || '',
@@ -2256,6 +2284,8 @@ app.post('/people', async (req, res, next) => {
         mapLat: person.mapLat,
         mapLng: person.mapLng,
         notes: person.notes
+        ,
+        photoUrl: person.photoUrl
       });
       return res.redirect(`/people/new?${params.toString()}`);
     }
@@ -2299,6 +2329,7 @@ app.post('/people/:id', async (req, res, next) => {
         write('allergies', (value) => value || '');
         write('emergencyContact', (value) => value || '');
         write('medicalNotes', (value) => value || '');
+        write('photoUrl', (value) => normalizePhotoUrl(value));
         write('address', (value) => value || '');
         write('city', (value) => value || '');
         write('state', (value) => value || '');
@@ -2526,6 +2557,8 @@ app.get('/followups', async (req, res, next) => {
     const todoistHttp = normalizePositiveInt(req.query.todoistHttp, 0);
     const todoistError = normalize(req.query.todoistError);
     const todoistEndpoint = normalize(req.query.todoistEndpoint);
+    const todoistSyncCount = normalizePositiveInt(req.query.todoistSyncCount, 0);
+    const todoistSyncSkipped = normalizePositiveInt(req.query.todoistSyncSkipped, 0);
 
     const peopleById = data.people.reduce((acc, person) => {
       acc[person.id] = person;
@@ -2620,6 +2653,8 @@ app.get('/followups', async (req, res, next) => {
       todoistHttp,
       todoistError,
       todoistEndpoint,
+      todoistSyncCount,
+      todoistSyncSkipped,
       q: normalize(req.query.q),
       qEncoded: encodeURIComponent(normalize(req.query.q)),
       followupsReturnTo: buildFollowupsReturnTo(status, stage, view, req.query.q, due)
@@ -2842,6 +2877,64 @@ app.post('/followups/bulk/todoist', async (req, res, next) => {
     }
 
     return res.redirect(`${returnTo}&todoist=bulk_sent&todoistCount=${sent}&todoistSkipped=${skipped}`);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/followups/sync/todoist', async (req, res, next) => {
+  try {
+    const returnTo = normalize(req.body.returnTo) || '/followups?status=open&stage=all&view=table';
+    const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+    const token = integrationSettings.todoistApiToken;
+    if (!token) {
+      const separator = returnTo.includes('?') ? '&' : '?';
+      return res.redirect(`${returnTo}${separator}todoist=missing_token`);
+    }
+
+    const openSynced = (data.followUps || []).filter(
+      (item) => item.status !== 'completed' && isFollowUpTodoistSynced(item)
+    );
+    let completedCount = 0;
+    let skipped = 0;
+    const completedIds = [];
+
+    for (const item of openSynced) {
+      const lookup = await getTodoistActiveTask(token, item.todoistTaskId);
+      if (lookup.found) {
+        skipped += 1;
+        continue;
+      }
+      if ([404, 410].includes(lookup.status)) {
+        completedIds.push(item.id);
+        completedCount += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+
+    if (completedIds.length) {
+      await updateData((state) => {
+        const nowIso = new Date().toISOString();
+        state.followUps.forEach((row) => {
+          if (completedIds.includes(row.id)) {
+            row.status = 'completed';
+            row.completedAt = nowIso;
+            row.updatedAt = nowIso;
+            row.notes = row.notes
+              ? `${row.notes}\n[Todoist Sync] Marked complete from Todoist`
+              : '[Todoist Sync] Marked complete from Todoist';
+          }
+        });
+        return state;
+      });
+    }
+
+    const separator = returnTo.includes('?') ? '&' : '?';
+    return res.redirect(
+      `${returnTo}${separator}todoist=sync_completed&todoistSyncCount=${completedCount}&todoistSyncSkipped=${skipped}`
+    );
   } catch (err) {
     return next(err);
   }
