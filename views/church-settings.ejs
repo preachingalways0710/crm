@@ -4,16 +4,14 @@
   <div class="card mb-3 church-settings-top-tabs">
     <div class="card-body p-2">
       <div class="nav nav-pills church-settings-tabs">
-        <span class="nav-link active"><i class="bi bi-house me-1"></i>Church Details</span>
-        <span class="nav-link disabled"><i class="bi bi-telephone me-1"></i>Contact Details</span>
-        <span class="nav-link disabled"><i class="bi bi-plug me-1"></i>Integrations</span>
-        <span class="nav-link disabled"><i class="bi bi-sliders me-1"></i>Defaults</span>
+        <a class="nav-link <%= settingsTab === 'church' ? 'active' : '' %>" href="/settings/church?tab=church"><i class="bi bi-house me-1"></i>Church Settings</a>
+        <a class="nav-link <%= settingsTab === 'integrations' ? 'active' : '' %>" href="/settings/church?tab=integrations"><i class="bi bi-puzzle me-1"></i>Add-ons</a>
       </div>
     </div>
   </div>
 
   <% if (saveStatus === 'saved') { %>
-    <div class="alert alert-success" role="alert">Church settings saved.</div>
+    <div class="alert alert-success" role="alert">Settings saved.</div>
   <% } %>
   <% if (geocodeStatus === 'success') { %>
     <div class="alert alert-info" role="alert">Map coordinates were auto-filled from the church address.</div>
@@ -28,110 +26,152 @@
     <div class="alert alert-warning" role="alert">Please provide church address details so we can auto-set the map base.</div>
   <% } %>
   <% if (isReadOnly) { %>
-    <div class="alert alert-secondary" role="alert">Read-only view. Only admin users can edit church settings.</div>
+    <div class="alert alert-secondary" role="alert">Read-only view. Only admin users can edit settings.</div>
   <% } %>
 
-  <div class="row g-3">
-    <div class="col-12">
-      <form method="post" action="/settings/church" class="d-grid gap-3">
-        <fieldset <%= isReadOnly ? 'disabled' : '' %>>
-        <div class="card church-settings-panel" id="church-details">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <h3 class="card-title mb-0">Church Details</h3>
-            <span class="text-secondary"><i class="bi <%= isReadOnly ? 'bi-eye' : 'bi-pencil' %> me-1"></i><%= isReadOnly ? 'View' : 'Edit' %></span>
-          </div>
-          <div class="card-body row g-2">
-            <div class="col-12 col-md-7">
-              <label class="form-label">Church Name</label>
-              <input class="form-control" name="name" value="<%= churchSettings.name || '' %>" placeholder="Igreja batista biblica do vale" />
-            </div>
-            <div class="col-12 col-md-5">
-              <label class="form-label">Email</label>
-              <input class="form-control" type="email" name="email" value="<%= churchSettings.email || '' %>" placeholder="church@example.com" />
-            </div>
-          </div>
-        </div>
-
-        <div class="card church-settings-panel" id="contact-details">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <h3 class="card-title mb-0">Contact Details</h3>
-            <span class="text-secondary"><i class="bi <%= isReadOnly ? 'bi-eye' : 'bi-pencil' %> me-1"></i><%= isReadOnly ? 'View' : 'Edit' %></span>
-          </div>
-          <div class="card-body row g-2">
-            <div class="col-12 col-md-4">
-              <label class="form-label">Phone</label>
-              <input class="form-control" name="phone" value="<%= churchSettings.phone || '' %>" placeholder="+55 69 99999-9999" />
-            </div>
-            <div class="col-12 col-md-8">
-              <label class="form-label">Address</label>
-              <input class="form-control" name="address" value="<%= churchSettings.address || '' %>" placeholder="Street and number" />
-            </div>
-            <div class="col-12 col-md-4">
-              <label class="form-label">City</label>
-              <input class="form-control" name="city" value="<%= churchSettings.city || '' %>" placeholder="Porto Velho" />
-            </div>
-            <div class="col-12 col-md-4">
-              <label class="form-label">State</label>
-              <input class="form-control" name="state" value="<%= churchSettings.state || '' %>" placeholder="Rondonia" />
-            </div>
-            <div class="col-12 col-md-4">
-              <label class="form-label">ZIP Code</label>
-              <input class="form-control" name="zipCode" value="<%= churchSettings.zipCode || '' %>" placeholder="76800-000" />
-            </div>
-          </div>
-        </div>
-
-        <div class="card church-settings-panel" id="integrations">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <h3 class="card-title mb-0">Integrations</h3>
-            <span class="text-secondary"><i class="bi <%= isReadOnly ? 'bi-eye' : 'bi-pencil' %> me-1"></i><%= isReadOnly ? 'View' : 'Edit' %></span>
-          </div>
-          <div class="card-body row g-2">
-            <div class="col-12">
-              <label class="form-check">
-                <input class="form-check-input" type="checkbox" name="todoistEnabled" <%= integrationSettings.todoistEnabled ? 'checked' : '' %> />
-                <span class="form-check-label">Enable Todoist Add-on</span>
-              </label>
-            </div>
-            <div class="col-12">
-              <label class="form-label">Todoist API Token</label>
-              <input class="form-control" name="todoistApiToken" value="<%= integrationSettings.todoistApiToken || '' %>" placeholder="Paste Todoist token" />
-              <% if (maskedTodoistToken) { %>
-                <div class="form-hint">Saved token: <%= maskedTodoistToken %></div>
-              <% } %>
-            </div>
-            <div class="col-12 col-md-6">
-              <label class="form-label">Todoist Project ID (optional)</label>
-              <input class="form-control" name="todoistProjectId" value="<%= integrationSettings.todoistProjectId || '' %>" placeholder="e.g. 2312345678" />
-            </div>
-            <div class="col-12 mt-2">
-              <label class="form-check">
-                <input class="form-check-input" type="checkbox" name="thingsEnabled" <%= integrationSettings.thingsEnabled ? 'checked' : '' %> />
-                <span class="form-check-label">Enable Things Add-on</span>
-              </label>
-            </div>
-            <div class="col-12">
-              <label class="form-label">Things Email (Mail to Things)</label>
-              <input class="form-control" name="thingsEmail" value="<%= integrationSettings.thingsEmail || '' %>" placeholder="add-to-things-xxxx@things.email" />
-            </div>
-            <div class="col-12">
-              <div class="form-hint">Google Calendar and Things use one-click actions from the Follow-ups page.</div>
-            </div>
-          </div>
-        </div>
-
-        </fieldset>
-
-        <div class="d-flex">
-          <% if (isReadOnly) { %>
-            <button class="btn btn-secondary" type="button" disabled>Admin Required To Save</button>
-          <% } else { %>
-            <button class="btn btn-primary" type="submit">Save Church Settings</button>
-          <% } %>
-        </div>
-      </form>
+  <% if (settingsTab === 'church') { %>
+    <div class="card mb-3">
+      <div class="card-header"><h3 class="card-title mb-0">Active Add-ons</h3></div>
+      <div class="card-body d-flex flex-wrap gap-2">
+        <% if (integrationSettings.calendarEnabled) { %><span class="badge bg-azure-lt">Calendar</span><% } %>
+        <% if (integrationSettings.thingsEnabled) { %><span class="badge bg-green-lt">Things</span><% } %>
+        <% if (integrationSettings.todoistEnabled) { %><span class="badge bg-orange-lt">Todoist</span><% } %>
+      </div>
     </div>
-  </div>
+
+    <form method="post" action="/settings/church" class="d-grid gap-3">
+      <input type="hidden" name="settingsTab" value="church" />
+      <input type="hidden" name="calendarEnabled" value="<%= integrationSettings.calendarEnabled ? 'on' : '' %>" />
+      <input type="hidden" name="thingsEnabled" value="<%= integrationSettings.thingsEnabled ? 'on' : '' %>" />
+      <input type="hidden" name="thingsEmail" value="<%= integrationSettings.thingsEmail || '' %>" />
+      <input type="hidden" name="todoistEnabled" value="<%= integrationSettings.todoistEnabled ? 'on' : '' %>" />
+      <input type="hidden" name="todoistApiToken" value="<%= integrationSettings.todoistApiToken || '' %>" />
+      <input type="hidden" name="todoistProjectId" value="<%= integrationSettings.todoistProjectId || '' %>" />
+      <fieldset <%= isReadOnly ? 'disabled' : '' %>>
+      <div class="card church-settings-panel" id="church-details">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h3 class="card-title mb-0">Church Details</h3>
+        </div>
+        <div class="card-body row g-2">
+          <div class="col-12 col-md-7">
+            <label class="form-label">Church Name</label>
+            <input class="form-control" name="name" value="<%= churchSettings.name || '' %>" placeholder="Igreja batista biblica do vale" />
+          </div>
+          <div class="col-12 col-md-5">
+            <label class="form-label">Email</label>
+            <input class="form-control" type="email" name="email" value="<%= churchSettings.email || '' %>" placeholder="church@example.com" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card church-settings-panel" id="contact-details">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h3 class="card-title mb-0">Contact Details</h3>
+        </div>
+        <div class="card-body row g-2">
+          <div class="col-12 col-md-4">
+            <label class="form-label">Phone</label>
+            <input class="form-control" name="phone" value="<%= churchSettings.phone || '' %>" placeholder="+55 69 99999-9999" />
+          </div>
+          <div class="col-12 col-md-8">
+            <label class="form-label">Address</label>
+            <input class="form-control" name="address" value="<%= churchSettings.address || '' %>" placeholder="Street and number" />
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">City</label>
+            <input class="form-control" name="city" value="<%= churchSettings.city || '' %>" placeholder="Porto Velho" />
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">State</label>
+            <input class="form-control" name="state" value="<%= churchSettings.state || '' %>" placeholder="Rondonia" />
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label">ZIP Code</label>
+            <input class="form-control" name="zipCode" value="<%= churchSettings.zipCode || '' %>" placeholder="76800-000" />
+          </div>
+        </div>
+      </div>
+      </fieldset>
+
+      <div class="d-flex">
+        <% if (isReadOnly) { %>
+          <button class="btn btn-secondary" type="button" disabled>Admin Required To Save</button>
+        <% } else { %>
+          <button class="btn btn-primary" type="submit">Save Church Settings</button>
+        <% } %>
+      </div>
+    </form>
+  <% } %>
+
+  <% if (settingsTab === 'integrations') { %>
+    <form method="post" action="/settings/church">
+      <input type="hidden" name="settingsTab" value="integrations" />
+      <input type="hidden" name="name" value="<%= churchSettings.name || '' %>" />
+      <input type="hidden" name="email" value="<%= churchSettings.email || '' %>" />
+      <input type="hidden" name="phone" value="<%= churchSettings.phone || '' %>" />
+      <input type="hidden" name="address" value="<%= churchSettings.address || '' %>" />
+      <input type="hidden" name="city" value="<%= churchSettings.city || '' %>" />
+      <input type="hidden" name="state" value="<%= churchSettings.state || '' %>" />
+      <input type="hidden" name="zipCode" value="<%= churchSettings.zipCode || '' %>" />
+      <fieldset <%= isReadOnly ? 'disabled' : '' %>>
+      <div class="row g-3">
+        <div class="col-12 col-md-6 col-xl-4">
+          <div class="card">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start mb-2">
+                <strong>Calendar</strong>
+                <label class="form-check form-switch m-0">
+                  <input class="form-check-input" type="checkbox" name="calendarEnabled" <%= integrationSettings.calendarEnabled ? 'checked' : '' %> />
+                </label>
+              </div>
+              <div class="text-secondary small">Show Google Calendar action in follow-ups.</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-4">
+          <div class="card">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start mb-2">
+                <strong>Things</strong>
+                <label class="form-check form-switch m-0">
+                  <input class="form-check-input" type="checkbox" name="thingsEnabled" <%= integrationSettings.thingsEnabled ? 'checked' : '' %> />
+                </label>
+              </div>
+              <div class="text-secondary small mb-2">Enable Mail to Things action.</div>
+              <label class="form-label small">Things Email</label>
+              <input class="form-control form-control-sm" name="thingsEmail" value="<%= integrationSettings.thingsEmail || '' %>" placeholder="add-to-things-xxxx@things.email" />
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-4">
+          <div class="card">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-start mb-2">
+                <strong>Todoist</strong>
+                <label class="form-check form-switch m-0">
+                  <input class="form-check-input" type="checkbox" name="todoistEnabled" <%= integrationSettings.todoistEnabled ? 'checked' : '' %> />
+                </label>
+              </div>
+              <div class="text-secondary small mb-2">Enable Todoist task actions.</div>
+              <label class="form-label small">API Token</label>
+              <input class="form-control form-control-sm mb-2" name="todoistApiToken" value="<%= integrationSettings.todoistApiToken || '' %>" placeholder="Paste token" />
+              <label class="form-label small">Project ID (optional)</label>
+              <input class="form-control form-control-sm" name="todoistProjectId" value="<%= integrationSettings.todoistProjectId || '' %>" placeholder="e.g. 2312345678" />
+            </div>
+          </div>
+        </div>
+      </div>
+      </fieldset>
+
+      <div class="d-flex mt-3">
+        <% if (isReadOnly) { %>
+          <button class="btn btn-secondary" type="button" disabled>Admin Required To Save</button>
+        <% } else { %>
+          <button class="btn btn-primary" type="submit">Save Add-ons</button>
+        <% } %>
+      </div>
+    </form>
+  <% } %>
 </div>
 
 <%- include('partials-footer') %>

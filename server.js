@@ -195,6 +195,7 @@ function hydrateChurchSettings(settings) {
 function hydrateIntegrationSettings(settings) {
   const raw = settings && typeof settings === 'object' ? settings : {};
   return {
+    calendarEnabled: raw.calendarEnabled === false ? false : true,
     todoistEnabled: normalize(raw.todoistEnabled) === 'true' || raw.todoistEnabled === true,
     todoistApiToken: normalize(raw.todoistApiToken),
     todoistProjectId: normalize(raw.todoistProjectId),
@@ -1803,6 +1804,7 @@ app.get('/settings/church', async (req, res, next) => {
     const saveStatus = normalize(req.query.saved) === '1' ? 'saved' : '';
     const geocodeStatus = normalize(req.query.geocode);
     const isReadOnly = !isSessionAdmin(req);
+    const settingsTab = normalize(req.query.tab) === 'integrations' ? 'integrations' : 'church';
 
     res.render('church-settings', {
       activeTab: 'church_settings',
@@ -1811,7 +1813,8 @@ app.get('/settings/church', async (req, res, next) => {
       maskedTodoistToken: maskSecret(integrationSettings.todoistApiToken),
       saveStatus,
       geocodeStatus,
-      isReadOnly
+      isReadOnly,
+      settingsTab
     });
   } catch (err) {
     next(err);
@@ -1820,6 +1823,7 @@ app.get('/settings/church', async (req, res, next) => {
 
 app.post('/settings/church', requireAdmin, async (req, res, next) => {
   try {
+    const settingsTab = normalize(req.body.settingsTab) === 'integrations' ? 'integrations' : 'church';
     let geocodeStatus = 'none';
     const churchSettings = hydrateChurchSettings({
       name: req.body.name,
@@ -1831,71 +1835,78 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       zipCode: req.body.zipCode
     });
 
-    const geocodeQuery = formatChurchAddress(churchSettings);
+    if (settingsTab === 'church') {
+      const geocodeQuery = formatChurchAddress(churchSettings);
 
-    if (!geocodeQuery) {
-      const params = new URLSearchParams({
-        saved: '0',
-        geocode: 'missing_address'
-      });
-      return res.redirect(`/settings/church?${params.toString()}`);
-    }
+      if (!geocodeQuery) {
+        const params = new URLSearchParams({
+          saved: '0',
+          geocode: 'missing_address',
+          tab: settingsTab
+        });
+        return res.redirect(`/settings/church?${params.toString()}`);
+      }
 
-    const geocoded = await geocodeAddress(churchSettings);
-    if (geocoded) {
-      churchSettings.mapLat = geocoded.lat;
-      churchSettings.mapLng = geocoded.lng;
-      geocodeStatus = 'success';
-    } else {
-      geocodeStatus = 'failed';
+      const geocoded = await geocodeAddress(churchSettings);
+      if (geocoded) {
+        churchSettings.mapLat = geocoded.lat;
+        churchSettings.mapLng = geocoded.lng;
+        geocodeStatus = 'success';
+      } else {
+        geocodeStatus = 'failed';
+      }
     }
 
     await updateData((data) => {
       data.settings = data.settings || {};
       data.settings.integrations = hydrateIntegrationSettings({
+        calendarEnabled: req.body.calendarEnabled === 'on',
         todoistEnabled: req.body.todoistEnabled === 'on',
         todoistApiToken: req.body.todoistApiToken,
         todoistProjectId: req.body.todoistProjectId,
         thingsEnabled: req.body.thingsEnabled === 'on',
         thingsEmail: req.body.thingsEmail
       });
-      const previousChurchSettings = hydrateChurchSettings((data.settings || {}).church);
+      if (settingsTab === 'church') {
+        const previousChurchSettings = hydrateChurchSettings((data.settings || {}).church);
 
-      if (churchSettings.mapLat && churchSettings.mapLng) {
-        data.settings.church = churchSettings;
-      } else if (previousChurchSettings.mapLat && previousChurchSettings.mapLng) {
-        // Keep prior resolved coordinates if geocoding is temporarily unavailable.
-        data.settings.church = {
-          ...churchSettings,
-          mapLat: previousChurchSettings.mapLat,
-          mapLng: previousChurchSettings.mapLng
-        };
-        geocodeStatus = 'failed_using_previous';
-      } else {
-        data.settings.church = churchSettings;
-      }
-
-      const currentVisitation = hydrateVisitationSettings((data.settings || {}).visitation, data.people || []);
-      const resolvedChurchSettings = hydrateChurchSettings(data.settings.church);
-      const resolvedChurchAddress = formatChurchAddress(resolvedChurchSettings);
-      data.settings.visitation = {
-        ...currentVisitation,
-        mapCenterMode: 'church',
-        mapCenterZoom: normalizeMapZoom(currentVisitation.mapCenterZoom, 17),
-        profilePersonId: '',
-        churchProfile: {
-          name: resolvedChurchSettings.name,
-          address: resolvedChurchAddress,
-          lat: resolvedChurchSettings.mapLat,
-          lng: resolvedChurchSettings.mapLng
+        if (churchSettings.mapLat && churchSettings.mapLng) {
+          data.settings.church = churchSettings;
+        } else if (previousChurchSettings.mapLat && previousChurchSettings.mapLng) {
+          // Keep prior resolved coordinates if geocoding is temporarily unavailable.
+          data.settings.church = {
+            ...churchSettings,
+            mapLat: previousChurchSettings.mapLat,
+            mapLng: previousChurchSettings.mapLng
+          };
+          geocodeStatus = 'failed_using_previous';
+        } else {
+          data.settings.church = churchSettings;
         }
-      };
+
+        const currentVisitation = hydrateVisitationSettings((data.settings || {}).visitation, data.people || []);
+        const resolvedChurchSettings = hydrateChurchSettings(data.settings.church);
+        const resolvedChurchAddress = formatChurchAddress(resolvedChurchSettings);
+        data.settings.visitation = {
+          ...currentVisitation,
+          mapCenterMode: 'church',
+          mapCenterZoom: normalizeMapZoom(currentVisitation.mapCenterZoom, 17),
+          profilePersonId: '',
+          churchProfile: {
+            name: resolvedChurchSettings.name,
+            address: resolvedChurchAddress,
+            lat: resolvedChurchSettings.mapLat,
+            lng: resolvedChurchSettings.mapLng
+          }
+        };
+      }
 
       return data;
     });
 
     const params = new URLSearchParams({
       saved: '1',
+      tab: settingsTab,
       ...(geocodeStatus !== 'none' ? { geocode: geocodeStatus } : {})
     });
 
@@ -2823,6 +2834,7 @@ app.get('/followups', async (req, res, next) => {
       due,
       board,
       dueGroups,
+      calendarEnabled: integrationSettings.calendarEnabled,
       todoistEnabled: integrationSettings.todoistEnabled && Boolean(integrationSettings.todoistApiToken),
       thingsEnabled: integrationSettings.thingsEnabled && Boolean(integrationSettings.thingsEmail),
       todoistStatus,
