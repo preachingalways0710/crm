@@ -195,8 +195,10 @@ function hydrateChurchSettings(settings) {
 function hydrateIntegrationSettings(settings) {
   const raw = settings && typeof settings === 'object' ? settings : {};
   return {
+    todoistEnabled: normalize(raw.todoistEnabled) === 'true' || raw.todoistEnabled === true,
     todoistApiToken: normalize(raw.todoistApiToken),
     todoistProjectId: normalize(raw.todoistProjectId),
+    thingsEnabled: raw.thingsEnabled === false ? false : true,
     thingsEmail: normalize(raw.thingsEmail)
   };
 }
@@ -1851,8 +1853,10 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
     await updateData((data) => {
       data.settings = data.settings || {};
       data.settings.integrations = hydrateIntegrationSettings({
+        todoistEnabled: req.body.todoistEnabled === 'on',
         todoistApiToken: req.body.todoistApiToken,
         todoistProjectId: req.body.todoistProjectId,
+        thingsEnabled: req.body.thingsEnabled === 'on',
         thingsEmail: req.body.thingsEmail
       });
       const previousChurchSettings = hydrateChurchSettings((data.settings || {}).church);
@@ -2819,8 +2823,8 @@ app.get('/followups', async (req, res, next) => {
       due,
       board,
       dueGroups,
-      todoistEnabled: Boolean(integrationSettings.todoistApiToken),
-      thingsEnabled: Boolean(integrationSettings.thingsEmail),
+      todoistEnabled: integrationSettings.todoistEnabled && Boolean(integrationSettings.todoistApiToken),
+      thingsEnabled: integrationSettings.thingsEnabled && Boolean(integrationSettings.thingsEmail),
       todoistStatus,
       todoistCount,
       todoistSkipped,
@@ -2908,7 +2912,7 @@ app.post('/followups/:followUpId/todoist', async (req, res, next) => {
     const returnTo = normalize(req.body.returnTo) || '/followups?status=open';
     const data = await readData();
     const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
-    const token = integrationSettings.todoistApiToken;
+    const token = integrationSettings.todoistEnabled ? integrationSettings.todoistApiToken : '';
 
     if (!token) {
       const separator = returnTo.includes('?') ? '&' : '?';
@@ -2982,7 +2986,7 @@ app.post('/followups/bulk/todoist', async (req, res, next) => {
 
     const data = await readData();
     const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
-    const token = integrationSettings.todoistApiToken;
+    const token = integrationSettings.todoistEnabled ? integrationSettings.todoistApiToken : '';
     if (!token) {
       return res.redirect(`${returnTo}&todoist=missing_token`);
     }
@@ -3061,7 +3065,7 @@ app.post('/followups/sync/todoist', async (req, res, next) => {
     const returnTo = normalize(req.body.returnTo) || '/followups?status=open&stage=all&view=table';
     const data = await readData();
     const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
-    const token = integrationSettings.todoistApiToken;
+    const token = integrationSettings.todoistEnabled ? integrationSettings.todoistApiToken : '';
     if (!token) {
       const separator = returnTo.includes('?') ? '&' : '?';
       return res.redirect(`${returnTo}${separator}todoist=missing_token`);
