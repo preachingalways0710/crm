@@ -1,5 +1,6 @@
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs/promises');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
@@ -37,6 +38,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024 }
 });
+const PEOPLE_UPLOADS_DIR = path.join(__dirname, 'public', 'uploads', 'people');
+const ALLOWED_PHOTO_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const PEOPLE_DIRECTORY_DEFAULT_PAGE_SIZE = 50;
 const PEOPLE_DIRECTORY_PAGE_SIZES = [25, 50, 100];
 
@@ -113,6 +116,19 @@ function normalize(value) {
 
 function normalizePhotoUrl(value) {
   return normalizeUrlWithScheme(value);
+}
+
+async function savePersonPhotoFile(file) {
+  if (!file || !file.buffer || !file.originalname) return '';
+  if (!ALLOWED_PHOTO_MIME_TYPES.has(file.mimetype)) return '';
+
+  const extension = path.extname(file.originalname).toLowerCase();
+  const safeExtension = ['.jpg', '.jpeg', '.png', '.webp', '.gif'].includes(extension) ? extension : '.jpg';
+  await fs.mkdir(PEOPLE_UPLOADS_DIR, { recursive: true });
+  const filename = `${Date.now()}-${crypto.randomUUID()}${safeExtension}`;
+  const absolutePath = path.join(PEOPLE_UPLOADS_DIR, filename);
+  await fs.writeFile(absolutePath, file.buffer);
+  return `/static/uploads/people/${filename}`;
 }
 
 function normalizePhone(value) {
@@ -2298,8 +2314,9 @@ app.get('/people/:id', async (req, res, next) => {
   }
 });
 
-app.post('/people', async (req, res, next) => {
+app.post('/people', upload.single('photoFile'), async (req, res, next) => {
   try {
+    const uploadedPhotoUrl = await savePersonPhotoFile(req.file);
     const nowIso = new Date().toISOString();
     const person = {
       id: id(),
@@ -2318,7 +2335,7 @@ app.post('/people', async (req, res, next) => {
       allergies: req.body.allergies || '',
       emergencyContact: req.body.emergencyContact || '',
       medicalNotes: req.body.medicalNotes || '',
-      photoUrl: normalizePhotoUrl(req.body.photoUrl),
+      photoUrl: uploadedPhotoUrl || normalizePhotoUrl(req.body.photoUrl),
       address: req.body.address || '',
       city: req.body.city || '',
       state: req.body.state || '',
@@ -2400,9 +2417,10 @@ app.post('/people', async (req, res, next) => {
   }
 });
 
-app.post('/people/:id', async (req, res, next) => {
+app.post('/people/:id', upload.single('photoFile'), async (req, res, next) => {
   try {
     const returnTo = req.body.returnTo || `/people/${req.params.id}`;
+    const uploadedPhotoUrl = await savePersonPhotoFile(req.file);
 
     await updateData((data) => {
       const person = data.people.find((entry) => entry.id === req.params.id);
@@ -2433,7 +2451,7 @@ app.post('/people/:id', async (req, res, next) => {
         write('allergies', (value) => value || '');
         write('emergencyContact', (value) => value || '');
         write('medicalNotes', (value) => value || '');
-        write('photoUrl', (value) => normalizePhotoUrl(value));
+        write('photoUrl', (value) => uploadedPhotoUrl || normalizePhotoUrl(value));
         write('address', (value) => value || '');
         write('city', (value) => value || '');
         write('state', (value) => value || '');

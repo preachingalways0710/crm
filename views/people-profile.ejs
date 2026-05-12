@@ -175,7 +175,7 @@
         </div>
       </div>
 
-      <form method="post" action="/people/<%= person.id %>">
+      <form method="post" action="/people/<%= person.id %>" enctype="multipart/form-data">
         <input type="hidden" name="returnTo" value="/people/<%= person.id %>?tab=profile" />
 
         <div class="row g-3">
@@ -205,7 +205,16 @@
               <div class="card-body row g-2">
                 <div class="col-12"><label class="form-label">Email</label><input class="form-control" name="email" value="<%= person.email || '' %>" /></div>
                 <div class="col-12"><label class="form-label">Phone</label><input class="form-control" name="phone" value="<%= person.phone || '' %>" /></div>
-                <div class="col-12"><label class="form-label">Photo URL</label><input class="form-control" name="photoUrl" placeholder="https://..." value="<%= person.photoUrl || '' %>" /></div>
+                <div class="col-12"><label class="form-label">Photo URL</label><input class="form-control" id="photoUrlInputProfile" name="photoUrl" placeholder="https://..." value="<%= person.photoUrl || '' %>" /></div>
+                <div class="col-12"><label class="form-label">Upload Photo</label><input class="form-control" id="photoFileInputProfile" type="file" accept="image/*" name="photoFile" /></div>
+                <div class="col-12">
+                  <label class="form-label">Preview</label>
+                  <% if (person.photoUrl) { %>
+                    <span class="avatar avatar-xl" id="photoPreviewProfile" style="background-image:url('<%= person.photoUrl %>'); background-size:cover; background-position:center;"></span>
+                  <% } else { %>
+                    <span class="avatar avatar-xl" id="photoPreviewProfile"><%= person.name?.charAt(0)?.toUpperCase() || '?' %></span>
+                  <% } %>
+                </div>
                 <div class="col-12"><label class="form-label">Address</label><input class="form-control" name="address" value="<%= person.address || '' %>" /></div>
                 <div class="col-4"><label class="form-label">City</label><input class="form-control" name="city" value="<%= person.city || '' %>" /></div>
                 <div class="col-4"><label class="form-label">State</label><input class="form-control" name="state" value="<%= person.state || '' %>" /></div>
@@ -441,6 +450,41 @@
 
     birthdayInput.addEventListener('input', refreshAge);
     refreshAge();
+  })();
+
+  (function () {
+    const urlInput = document.getElementById('photoUrlInputProfile');
+    const fileInput = document.getElementById('photoFileInputProfile');
+    const preview = document.getElementById('photoPreviewProfile');
+    if (!preview) return;
+
+    const setPreview = (src) => {
+      if (!src) return;
+      preview.style.backgroundImage = `url('${src}')`;
+      preview.style.backgroundSize = 'cover';
+      preview.style.backgroundPosition = 'center';
+      preview.textContent = '';
+    };
+
+    if (urlInput) {
+      urlInput.addEventListener('input', () => {
+        if (fileInput && fileInput.files && fileInput.files.length) return;
+        setPreview(urlInput.value.trim());
+      });
+    }
+
+    if (fileInput) {
+      fileInput.addEventListener('change', () => {
+        const [file] = fileInput.files || [];
+        if (!file) {
+          setPreview(urlInput ? urlInput.value.trim() : '');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => setPreview(String(reader.result || ''));
+        reader.readAsDataURL(file);
+      });
+    }
   })();
 </script>
 
