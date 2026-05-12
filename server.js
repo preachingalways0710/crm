@@ -195,10 +195,18 @@ function hydrateChurchSettings(settings) {
 function hydrateIntegrationSettings(settings) {
   const raw = settings && typeof settings === 'object' ? settings : {};
   return {
+    todoistApiToken: normalize(raw.todoistApiToken),
+    todoistProjectId: normalize(raw.todoistProjectId),
     thingsEmail: normalize(raw.thingsEmail)
   };
 }
 
+function maskSecret(value) {
+  const raw = normalize(value);
+  if (!raw) return '';
+  if (raw.length <= 8) return '********';
+  return `${raw.slice(0, 4)}••••${raw.slice(-4)}`;
+}
 
 function formatChurchAddress(churchSettings) {
   return [
@@ -1188,6 +1196,98 @@ function normalizeDueFilter(value) {
   return ['all', 'overdue', 'due_soon', 'upcoming'].includes(due) ? due : 'all';
 }
 
+function isFollowUpTodoistSynced(followUp) {
+  return Boolean(normalize(followUp?.todoistTaskId));
+}
+
+async function createTodoistTask(token, payload) {
+  const endpoints = [
+    'https://api.todoist.com/api/v1/tasks',
+    'https://api.todoist.com/rest/v2/tasks'
+  ];
+
+  const send = async (url, body) =>
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+  let response = null;
+  let responseText = '';
+  let endpointUsed = '';
+
+  for (const endpoint of endpoints) {
+    endpointUsed = endpoint;
+    response = await send(endpoint, payload);
+    responseText = await response.text();
+    if (response.ok) {
+      return { ok: true, task: JSON.parse(responseText || '{}') };
+    }
+
+    // Common failure: invalid project_id. Retry once without it on the same endpoint.
+    if (payload.project_id) {
+      const retryPayload = { ...payload };
+      delete retryPayload.project_id;
+      const retry = await send(endpoint, retryPayload);
+      const retryText = await retry.text();
+      if (retry.ok) {
+        return { ok: true, task: JSON.parse(retryText || '{}') };
+      }
+      response = retry;
+      responseText = retryText;
+    }
+
+    // Try next endpoint when deprecated or not found.
+    if (![404, 410].includes(Number(response.status) || 0)) {
+      break;
+    }
+  }
+
+  if (!response.ok) {
+    let apiError = '';
+    try {
+      const parsed = JSON.parse(responseText || '{}');
+      apiError = normalize(parsed.error || parsed.message || '');
+    } catch {
+      apiError = normalize(responseText).slice(0, 140);
+    }
+    const status = Number(response.status) || 0;
+    const reason =
+      status === 401 || status === 403
+        ? 'failed_auth'
+        : status === 400 || status === 404
+          ? 'failed_config'
+          : 'failed';
+    return { ok: false, reason, status, apiError, endpointUsed };
+  }
+  return { ok: true, task: JSON.parse(responseText || '{}') };
+}
+
+async function getTodoistActiveTask(token, taskId) {
+  const cleanedId = normalize(taskId);
+  if (!cleanedId) return { found: false, status: 0 };
+  const endpoints = [
+    `https://api.todoist.com/api/v1/tasks/${encodeURIComponent(cleanedId)}`,
+    `https://api.todoist.com/rest/v2/tasks/${encodeURIComponent(cleanedId)}`
+  ];
+
+  for (const endpoint of endpoints) {
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (response.ok) return { found: true, status: 200 };
+    if ([404, 410].includes(response.status)) continue;
+    return { found: false, status: response.status };
+  }
+
+  return { found: false, status: 404 };
+}
+
 function normalizeFamilyRelationshipType(value) {
   const type = normalize(value);
   return familyRelationshipTypes.includes(type) ? type : '';
@@ -1706,6 +1806,7 @@ app.get('/settings/church', async (req, res, next) => {
       activeTab: 'church_settings',
       churchSettings,
       integrationSettings,
+      maskedTodoistToken: maskSecret(integrationSettings.todoistApiToken),
       saveStatus,
       geocodeStatus,
       isReadOnly
@@ -1750,6 +1851,8 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
     await updateData((data) => {
       data.settings = data.settings || {};
       data.settings.integrations = hydrateIntegrationSettings({
+        todoistApiToken: req.body.todoistApiToken,
+        todoistProjectId: req.body.todoistProjectId,
         thingsEmail: req.body.thingsEmail
       });
       const previousChurchSettings = hydrateChurchSettings((data.settings || {}).church);
@@ -2620,6 +2723,14 @@ app.get('/followups', async (req, res, next) => {
     const view = normalize(req.query.view) === 'board' ? 'board' : 'table';
     const due = normalizeDueFilter(req.query.due);
     const q = normalize(req.query.q).toLowerCase();
+    const todoistStatus = normalize(req.query.todoist);
+    const todoistCount = normalizePositiveInt(req.query.todoistCount, 0);
+    const todoistSkipped = normalizePositiveInt(req.query.todoistSkipped, 0);
+    const todoistHttp = normalizePositiveInt(req.query.todoistHttp, 0);
+    const todoistError = normalize(req.query.todoistError);
+    const todoistEndpoint = normalize(req.query.todoistEndpoint);
+    const todoistSyncCount = normalizePositiveInt(req.query.todoistSyncCount, 0);
+    const todoistSyncSkipped = normalizePositiveInt(req.query.todoistSyncSkipped, 0);
 
     const peopleById = data.people.reduce((acc, person) => {
       acc[person.id] = person;
@@ -2649,6 +2760,7 @@ app.get('/followups', async (req, res, next) => {
           dueBucket,
           googleCalendarUrl: buildGoogleCalendarFollowUpUrl(person, item),
           thingsMailtoUrl: buildThingsMailtoUrl(integrationSettings.thingsEmail, person, item),
+          todoistSynced: isFollowUpTodoistSynced(item),
           personName: person?.name || 'Unknown person',
           personLink: person ? `/people/${person.id}?tab=followups` : '/people'
         };
@@ -2707,7 +2819,16 @@ app.get('/followups', async (req, res, next) => {
       due,
       board,
       dueGroups,
+      todoistEnabled: Boolean(integrationSettings.todoistApiToken),
       thingsEnabled: Boolean(integrationSettings.thingsEmail),
+      todoistStatus,
+      todoistCount,
+      todoistSkipped,
+      todoistHttp,
+      todoistError,
+      todoistEndpoint,
+      todoistSyncCount,
+      todoistSyncSkipped,
       q: normalize(req.query.q),
       qEncoded: encodeURIComponent(normalize(req.query.q)),
       followupsReturnTo: buildFollowupsReturnTo(status, stage, view, req.query.q, due)
@@ -2782,6 +2903,216 @@ app.post('/followups/:followUpId/stage', async (req, res, next) => {
   }
 });
 
+app.post('/followups/:followUpId/todoist', async (req, res, next) => {
+  try {
+    const returnTo = normalize(req.body.returnTo) || '/followups?status=open';
+    const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+    const token = integrationSettings.todoistApiToken;
+
+    if (!token) {
+      const separator = returnTo.includes('?') ? '&' : '?';
+      return res.redirect(`${returnTo}${separator}todoist=missing_token`);
+    }
+
+    const row = data.followUps.find((entry) => entry.id === req.params.followUpId);
+    if (!row) {
+      return res.redirect(returnTo);
+    }
+    const forceResend = normalize(req.body.forceResend) === '1';
+    if (!forceResend && isFollowUpTodoistSynced(row)) {
+      const separator = returnTo.includes('?') ? '&' : '?';
+      return res.redirect(`${returnTo}${separator}todoist=already_sent`);
+    }
+
+    const person = data.people.find((entry) => entry.id === row.personId);
+    const dueDate = toIsoDate(row.dueDate);
+    const payload = {
+      content: `${normalize(row.title) || 'Follow-up'}${person ? ` - ${person.name}` : ''}`,
+      description: normalize(row.notes) || undefined,
+      due_date: dueDate || undefined,
+      project_id: normalize(integrationSettings.todoistProjectId) || undefined
+    };
+
+    const taskCreate = await createTodoistTask(token, payload);
+    if (!taskCreate.ok) {
+      const separator = returnTo.includes('?') ? '&' : '?';
+      const params = new URLSearchParams({
+        todoist: taskCreate.reason,
+        todoistHttp: String(taskCreate.status || 0),
+        ...(taskCreate.apiError ? { todoistError: taskCreate.apiError } : {}),
+        ...(taskCreate.endpointUsed ? { todoistEndpoint: taskCreate.endpointUsed } : {})
+      });
+      return res.redirect(`${returnTo}${separator}${params.toString()}`);
+    }
+
+    const createdTask = taskCreate.task || {};
+    await updateData((state) => {
+      const target = state.followUps.find((entry) => entry.id === req.params.followUpId);
+      if (target) {
+        target.todoistTaskId = normalize(createdTask.id);
+        target.todoistSyncedAt = new Date().toISOString();
+        target.updatedAt = new Date().toISOString();
+      }
+      return state;
+    });
+
+    const separator = returnTo.includes('?') ? '&' : '?';
+    return res.redirect(`${returnTo}${separator}todoist=${forceResend ? 'resent' : 'sent'}`);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.get('/followups/:followUpId/todoist', (req, res) => {
+  return res.redirect('/followups?status=open&stage=all&view=table&todoist=use_post_action');
+});
+
+app.post('/followups/bulk/todoist', async (req, res, next) => {
+  try {
+    const bucket = normalize(req.body.bucket);
+    const status = normalize(req.body.status) || 'open';
+    const stage = normalize(req.body.stage) || 'all';
+    const view = normalize(req.body.view) === 'board' ? 'board' : 'table';
+    const returnTo = buildFollowupsReturnTo(status, stage, view, req.body.q, req.body.due);
+
+    if (!['overdue', 'due_soon'].includes(bucket)) {
+      return res.redirect(returnTo);
+    }
+
+    const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+    const token = integrationSettings.todoistApiToken;
+    if (!token) {
+      return res.redirect(`${returnTo}&todoist=missing_token`);
+    }
+
+    const peopleById = (data.people || []).reduce((acc, person) => {
+      acc[person.id] = person;
+      return acc;
+    }, {});
+    const today = new Date();
+
+    const candidates = (data.followUps || [])
+      .map((item) => {
+        const dueDate = toIsoDate(item.dueDate);
+        const dueDays = dueDate ? diffDays(new Date(dueDate), today) : null;
+        const dueBucket =
+          item.status === 'completed'
+            ? 'completed'
+            : dueDays === null
+              ? 'upcoming'
+              : dueDays < 0
+                ? 'overdue'
+                : dueDays <= 7
+                  ? 'due_soon'
+                  : 'upcoming';
+        return { ...item, dueDate, dueBucket };
+      })
+      .filter((item) => item.status !== 'completed' && item.dueBucket === bucket);
+
+    let sent = 0;
+    let skipped = 0;
+    for (const row of candidates) {
+      if (isFollowUpTodoistSynced(row)) {
+        skipped += 1;
+        continue;
+      }
+      const person = peopleById[row.personId];
+      const payload = {
+        content: `${normalize(row.title) || 'Follow-up'}${person ? ` - ${person.name}` : ''}`,
+        description: normalize(row.notes) || undefined,
+        due_date: row.dueDate || undefined,
+        project_id: normalize(integrationSettings.todoistProjectId) || undefined
+      };
+
+      const taskCreate = await createTodoistTask(token, payload);
+      if (taskCreate.ok) {
+        const createdTask = taskCreate.task || {};
+        await updateData((state) => {
+          const target = state.followUps.find((entry) => entry.id === row.id);
+          if (target) {
+            target.todoistTaskId = normalize(createdTask.id);
+            target.todoistSyncedAt = new Date().toISOString();
+            target.updatedAt = new Date().toISOString();
+          }
+          return state;
+        });
+        sent += 1;
+      } else if (taskCreate.reason === 'failed_auth') {
+        const params = new URLSearchParams({
+          todoist: 'failed_auth',
+          todoistHttp: String(taskCreate.status || 0),
+          ...(taskCreate.apiError ? { todoistError: taskCreate.apiError } : {}),
+          ...(taskCreate.endpointUsed ? { todoistEndpoint: taskCreate.endpointUsed } : {})
+        });
+        return res.redirect(`${returnTo}&${params.toString()}`);
+      }
+    }
+
+    return res.redirect(`${returnTo}&todoist=bulk_sent&todoistCount=${sent}&todoistSkipped=${skipped}`);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/followups/sync/todoist', async (req, res, next) => {
+  try {
+    const returnTo = normalize(req.body.returnTo) || '/followups?status=open&stage=all&view=table';
+    const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+    const token = integrationSettings.todoistApiToken;
+    if (!token) {
+      const separator = returnTo.includes('?') ? '&' : '?';
+      return res.redirect(`${returnTo}${separator}todoist=missing_token`);
+    }
+
+    const openSynced = (data.followUps || []).filter(
+      (item) => item.status !== 'completed' && isFollowUpTodoistSynced(item)
+    );
+    let completedCount = 0;
+    let skipped = 0;
+    const completedIds = [];
+
+    for (const item of openSynced) {
+      const lookup = await getTodoistActiveTask(token, item.todoistTaskId);
+      if (lookup.found) {
+        skipped += 1;
+        continue;
+      }
+      if ([404, 410].includes(lookup.status)) {
+        completedIds.push(item.id);
+        completedCount += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+
+    if (completedIds.length) {
+      await updateData((state) => {
+        const nowIso = new Date().toISOString();
+        state.followUps.forEach((row) => {
+          if (completedIds.includes(row.id)) {
+            row.status = 'completed';
+            row.completedAt = nowIso;
+            row.updatedAt = nowIso;
+            row.notes = row.notes
+              ? `${row.notes}\n[Todoist Sync] Marked complete from Todoist`
+              : '[Todoist Sync] Marked complete from Todoist';
+          }
+        });
+        return state;
+      });
+    }
+
+    const separator = returnTo.includes('?') ? '&' : '?';
+    return res.redirect(
+      `${returnTo}${separator}todoist=sync_completed&todoistSyncCount=${completedCount}&todoistSyncSkipped=${skipped}`
+    );
+  } catch (err) {
+    return next(err);
+  }
+});
 
 app.get('/metrics', async (req, res, next) => {
   try {

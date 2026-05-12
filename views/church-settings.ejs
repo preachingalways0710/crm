@@ -5,7 +5,8 @@
     <div class="card-body p-2">
       <div class="nav nav-pills church-settings-tabs">
         <span class="nav-link active"><i class="bi bi-house me-1"></i>Church Details</span>
-        <span class="nav-link disabled"><i class="bi bi-telephone me-1"></i>Contact Details</span>
+        <span class="nav-link disabled"><i class="bi bi-credit-card me-1"></i>Subscription</span>
+        <span class="nav-link disabled"><i class="bi bi-wallet2 me-1"></i>Billing</span>
         <span class="nav-link disabled"><i class="bi bi-plug me-1"></i>Integrations</span>
         <span class="nav-link disabled"><i class="bi bi-sliders me-1"></i>Defaults</span>
       </div>
@@ -32,7 +33,21 @@
   <% } %>
 
   <div class="row g-3">
-    <div class="col-12">
+    <div class="col-12 col-lg-3">
+      <div class="card church-settings-side sticky-card">
+        <div class="card-body">
+          <p class="text-secondary text-uppercase fw-bold mb-2">Sections</p>
+          <a class="church-settings-link active" href="#church-details"><i class="bi bi-house-door me-2"></i>Church Details</a>
+          <a class="church-settings-link" href="#contact-details"><i class="bi bi-telephone me-2"></i>Contact Details</a>
+          <a class="church-settings-link" href="#integrations"><i class="bi bi-plug me-2"></i>Integrations</a>
+          <div class="church-settings-side-note">
+            Visitation map is automatically centered from the church address.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-9">
       <form method="post" action="/settings/church" class="d-grid gap-3">
         <fieldset <%= isReadOnly ? 'disabled' : '' %>>
         <div class="card church-settings-panel" id="church-details">
@@ -87,6 +102,17 @@
             <span class="text-secondary"><i class="bi <%= isReadOnly ? 'bi-eye' : 'bi-pencil' %> me-1"></i><%= isReadOnly ? 'View' : 'Edit' %></span>
           </div>
           <div class="card-body row g-2">
+            <div class="col-12">
+              <label class="form-label">Todoist API Token</label>
+              <input class="form-control" name="todoistApiToken" value="<%= integrationSettings.todoistApiToken || '' %>" placeholder="Paste Todoist token" />
+              <% if (maskedTodoistToken) { %>
+                <div class="form-hint">Saved token: <%= maskedTodoistToken %></div>
+              <% } %>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label">Todoist Project ID (optional)</label>
+              <input class="form-control" name="todoistProjectId" value="<%= integrationSettings.todoistProjectId || '' %>" placeholder="e.g. 2312345678" />
+            </div>
             <div class="col-12">
               <label class="form-label">Things Email (Mail to Things)</label>
               <input class="form-control" name="thingsEmail" value="<%= integrationSettings.thingsEmail || '' %>" placeholder="add-to-things-xxxx@things.email" />
