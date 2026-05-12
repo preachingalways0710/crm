@@ -9,6 +9,7 @@
           <span class="badge bg-secondary-lt">
             <%= totalFilteredPeople ? `Showing ${pageRangeStart}-${pageRangeEnd} of ${totalFilteredPeople} people` : '0 people' %>
           </span>
+          <span class="badge bg-azure-lt" id="selectedPeopleCountBadge">Selected: 0</span>
           <a class="btn btn-primary btn-sm" href="/people/new">+ Person</a>
         </div>
       </div>
@@ -276,6 +277,7 @@
     const selectedEl = document.getElementById('bulkPeopleSelectedInline');
     const hiddenInputsEl = document.getElementById('bulkPeopleInputs');
     const clearBtn = document.getElementById('bulkClearSelectedBtn');
+    const selectedCountBadge = document.getElementById('selectedPeopleCountBadge');
     const selectAllEl = document.getElementById('peopleSelectAll');
     const rowCheckboxes = Array.from(document.querySelectorAll('.people-row-select'));
     if (!selectedEl || !hiddenInputsEl) return;
@@ -348,6 +350,9 @@
         empty.className = 'text-secondary small';
         empty.textContent = 'No people selected yet.';
         selectedEl.appendChild(empty);
+      }
+      if (selectedCountBadge) {
+        selectedCountBadge.textContent = `Selected: ${selected.size}`;
       }
       persist();
     };
