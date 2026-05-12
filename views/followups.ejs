@@ -1,36 +1,6 @@
 <%- include('partials-nav', { activeTab }) %>
 
 <div class="card">
-  <% if (todoistStatus === 'sent') { %>
-    <div class="alert alert-success m-3 mb-0" role="alert">Task sent to Todoist.</div>
-  <% } %>
-  <% if (todoistStatus === 'resent') { %>
-    <div class="alert alert-success m-3 mb-0" role="alert">Task resent to Todoist.</div>
-  <% } %>
-  <% if (todoistStatus === 'bulk_sent') { %>
-    <div class="alert alert-success m-3 mb-0" role="alert"><%= todoistCount %> tasks sent to Todoist. <%= todoistSkipped %> skipped (already sent).</div>
-  <% } %>
-  <% if (todoistStatus === 'already_sent') { %>
-    <div class="alert alert-info m-3 mb-0" role="alert">That follow-up was already sent to Todoist.</div>
-  <% } %>
-  <% if (todoistStatus === 'failed') { %>
-    <div class="alert alert-warning m-3 mb-0" role="alert">Could not send task to Todoist right now<%= todoistHttp ? ` (HTTP ${todoistHttp})` : '' %><%= todoistError ? `: ${todoistError}` : '.' %><%= todoistEndpoint ? ` Endpoint: ${todoistEndpoint}` : '' %></div>
-  <% } %>
-  <% if (todoistStatus === 'failed_auth') { %>
-    <div class="alert alert-warning m-3 mb-0" role="alert">Todoist rejected authentication. Recheck the API token in Integrations.</div>
-  <% } %>
-  <% if (todoistStatus === 'failed_config') { %>
-    <div class="alert alert-warning m-3 mb-0" role="alert">Todoist rejected task settings. Check Project ID (or leave it blank) and try again.</div>
-  <% } %>
-  <% if (todoistStatus === 'missing_token') { %>
-    <div class="alert alert-warning m-3 mb-0" role="alert">Set your Todoist API token in Church Settings first.</div>
-  <% } %>
-  <% if (todoistStatus === 'use_post_action') { %>
-    <div class="alert alert-info m-3 mb-0" role="alert">Please use the Send To Todoist button again from the queue.</div>
-  <% } %>
-  <% if (todoistStatus === 'sync_completed') { %>
-    <div class="alert alert-success m-3 mb-0" role="alert">Synced from Todoist: <%= todoistSyncCount %> follow-ups marked completed, <%= todoistSyncSkipped %> unchanged.</div>
-  <% } %>
   <div class="card-header">
     <h3 class="card-title">Global Follow-up Queue</h3>
     <div class="card-actions">
@@ -45,33 +15,6 @@
         <a class="badge <%= due === 'upcoming' ? 'bg-blue' : 'bg-blue-lt' %> text-decoration-none" href="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>&q=<%= qEncoded %>&due=upcoming">Upcoming: <%= dueGroups.upcoming.length %></a>
         <a class="badge <%= due === 'all' ? 'bg-secondary' : 'bg-secondary-lt' %> text-decoration-none" href="/followups?status=<%= status %>&stage=<%= stage %>&view=<%= view %>&q=<%= qEncoded %>&due=all">All</a>
       </div>
-      <% if (todoistEnabled) { %>
-        <div class="d-flex flex-wrap gap-2 mt-3">
-          <form method="post" action="/followups/sync/todoist">
-            <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
-            <button class="btn btn-outline-primary btn-sm" type="submit">Sync From Todoist</button>
-          </form>
-          <form method="post" action="/followups/bulk/todoist">
-            <input type="hidden" name="bucket" value="overdue" />
-            <input type="hidden" name="status" value="<%= status %>" />
-            <input type="hidden" name="stage" value="<%= stage %>" />
-            <input type="hidden" name="view" value="<%= view %>" />
-            <input type="hidden" name="q" value="<%= q || '' %>" />
-            <input type="hidden" name="due" value="<%= due || 'all' %>" />
-            <button class="btn btn-outline-secondary btn-sm" type="submit">Send Overdue To Todoist</button>
-          </form>
-          <form method="post" action="/followups/bulk/todoist">
-            <input type="hidden" name="bucket" value="due_soon" />
-            <input type="hidden" name="status" value="<%= status %>" />
-            <input type="hidden" name="stage" value="<%= stage %>" />
-            <input type="hidden" name="view" value="<%= view %>" />
-            <input type="hidden" name="q" value="<%= q || '' %>" />
-            <input type="hidden" name="due" value="<%= due || 'all' %>" />
-            <button class="btn btn-outline-secondary btn-sm" type="submit">Send Due Soon To Todoist</button>
-          </form>
-        </div>
-      <% } %>
-      <div class="text-secondary small mt-2">Todoist sync is one-way right now: sending from CRM creates tasks in Todoist, but completing in Todoist does not auto-complete in CRM.</div>
     </div>
   <% } %>
   <div class="card-body border-bottom">
@@ -153,21 +96,6 @@
                 <% if (thingsEnabled && item.thingsMailtoUrl) { %>
                   <a class="btn btn-outline-secondary btn-sm mb-2 w-100" href="<%= item.thingsMailtoUrl %>">Send To Things</a>
                 <% } %>
-                <% if (todoistEnabled) { %>
-                  <% if (item.todoistSynced) { %>
-                    <button class="btn btn-outline-secondary btn-sm mb-2 w-100" type="button" disabled>Already In Todoist</button>
-                    <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2" onsubmit="return confirm('Resend this follow-up to Todoist? This creates another task.');">
-                      <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
-                      <input type="hidden" name="forceResend" value="1" />
-                      <button class="btn btn-outline-warning btn-sm w-100" type="submit">Resend To Todoist</button>
-                    </form>
-                  <% } else { %>
-                    <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2">
-                      <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
-                      <button class="btn btn-outline-secondary btn-sm w-100" type="submit">Send To Todoist</button>
-                    </form>
-                  <% } %>
-                <% } %>
                 <% if (item.status === 'completed') { %>
                   <form method="post" action="/followups/<%= item.id %>/reopen">
                     <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
@@ -217,21 +145,6 @@
                     <a class="btn btn-outline-secondary btn-sm w-100 mb-2" href="<%= item.googleCalendarUrl %>" target="_blank" rel="noopener noreferrer">Google Calendar</a>
                     <% if (thingsEnabled && item.thingsMailtoUrl) { %>
                       <a class="btn btn-outline-secondary btn-sm w-100 mb-2" href="<%= item.thingsMailtoUrl %>">Send To Things</a>
-                    <% } %>
-                    <% if (todoistEnabled) { %>
-                      <% if (item.todoistSynced) { %>
-                        <button class="btn btn-outline-secondary btn-sm w-100 mb-2" type="button" disabled>Already In Todoist</button>
-                    <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2" onsubmit="return confirm('Resend this follow-up to Todoist? This creates another task.');">
-                          <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
-                          <input type="hidden" name="forceResend" value="1" />
-                          <button class="btn btn-outline-warning btn-sm w-100" type="submit">Resend To Todoist</button>
-                        </form>
-                      <% } else { %>
-                        <form method="post" action="/followups/<%= item.id %>/todoist" class="mb-2">
-                          <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
-                          <button class="btn btn-outline-secondary btn-sm w-100" type="submit">Send To Todoist</button>
-                        </form>
-                      <% } %>
                     <% } %>
 
                     <form method="post" action="/followups/<%= item.id %>/stage" class="mb-2">
