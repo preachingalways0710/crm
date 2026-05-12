@@ -13,21 +13,21 @@
         </div>
       </div>
       <div class="card-body border-bottom">
-        <form method="get" action="/people" class="row g-2">
+        <form method="get" action="/people" class="row g-2" id="peopleFiltersForm">
           <div class="col-12 col-md-3">
             <label class="form-label">Search</label>
             <input class="form-control" name="q" value="<%= q || '' %>" placeholder="Name, phone, email, section, notes" />
           </div>
           <div class="col-12 col-md-2">
             <label class="form-label">Follow-up Filter</label>
-            <select class="form-select" name="followups">
+            <select class="form-select" name="followups" onchange="this.form.submit()">
               <option value="all" <%= followups === 'all' ? 'selected' : '' %>>All people</option>
               <option value="open" <%= followups === 'open' ? 'selected' : '' %>>Only with open follow-ups</option>
             </select>
           </div>
           <div class="col-12 col-md-2">
             <label class="form-label">Membership</label>
-            <select class="form-select" name="membershipType">
+            <select class="form-select" name="membershipType" onchange="this.form.submit()">
               <option value="">Any</option>
               <% membershipTypes.forEach((type) => { %>
                 <option value="<%= type %>" <%= membershipTypeFilter === type ? 'selected' : '' %>><%= type %></option>
@@ -45,14 +45,14 @@
           </div>
           <div class="col-12 col-md-1">
             <label class="form-label">Per Page</label>
-            <select class="form-select" name="perPage">
+            <select class="form-select" name="perPage" onchange="this.form.submit()">
               <% pageSizeOptions.forEach((size) => { %>
                 <option value="<%= size %>" <%= pageSize === size ? 'selected' : '' %>><%= size %></option>
               <% }) %>
             </select>
           </div>
           <div class="col-12 col-md-2 d-flex align-items-end gap-2">
-            <button type="submit" class="btn btn-outline-primary w-100">Apply</button>
+            <button type="submit" class="btn btn-outline-primary w-100">Search</button>
             <a class="btn btn-outline-secondary" href="/people">Clear</a>
           </div>
         </form>
@@ -197,6 +197,39 @@
     </div>
 
     <div class="card">
+      <div class="card-header"><h3 class="card-title">Bulk Update</h3></div>
+      <div class="card-body">
+        <form method="post" action="/people/bulk-update" id="bulkPeopleForm" class="d-grid gap-2">
+          <input type="hidden" name="returnTo" value="/people?<%= new URLSearchParams({ q: q || '', followups: followups || 'all', membershipType: membershipTypeFilter || '', tag: tagFilter || '', perPage: String(pageSize || 50), ...(selectedSmartFilterId ? { smartFilter: selectedSmartFilterId } : {}) }).toString() %>" />
+          <label class="form-label">Find People</label>
+          <input class="form-control" id="bulkPeopleSearch" placeholder="Type name, phone, email..." autocomplete="off" />
+          <div id="bulkPeopleResults" class="list-group d-none"></div>
+          <div id="bulkPeopleSelected" class="d-flex flex-wrap gap-2"></div>
+          <div id="bulkPeopleInputs"></div>
+          <label class="form-label">Membership Type</label>
+          <select class="form-select" name="bulkMembershipType">
+            <option value="">No change</option>
+            <% membershipTypes.forEach((type) => { %>
+              <option value="<%= type %>"><%= type %></option>
+            <% }) %>
+          </select>
+          <label class="form-label">Follow-up Cadence</label>
+          <select class="form-select" name="bulkFollowUpCadenceMonths">
+            <option value="">No change</option>
+            <option value="0">Disabled</option>
+            <option value="1">Every month</option>
+            <option value="2">Every 2 months</option>
+          </select>
+          <label class="form-label">Add Tag</label>
+          <input class="form-control" name="bulkAddTag" placeholder="optional" />
+          <label class="form-label">Remove Tag</label>
+          <input class="form-control" name="bulkRemoveTag" placeholder="optional" />
+          <button class="btn btn-primary" type="submit">Run Bulk Update</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card mt-3">
       <div class="card-header"><h3 class="card-title">Quick Actions</h3></div>
       <div class="card-body d-grid gap-2">
         <a class="btn btn-outline-primary" href="/people/new">+ Add Person</a>
@@ -205,5 +238,93 @@
     </div>
   </div>
 </div>
+
+<script>
+  (() => {
+    const searchInput = document.getElementById('bulkPeopleSearch');
+    const resultsEl = document.getElementById('bulkPeopleResults');
+    const selectedEl = document.getElementById('bulkPeopleSelected');
+    const hiddenInputsEl = document.getElementById('bulkPeopleInputs');
+    if (!searchInput || !resultsEl || !selectedEl || !hiddenInputsEl) return;
+
+    const selected = new Map();
+    let requestCounter = 0;
+
+    const renderSelected = () => {
+      selectedEl.innerHTML = '';
+      hiddenInputsEl.innerHTML = '';
+      selected.forEach((person) => {
+        const chip = document.createElement('span');
+        chip.className = 'badge bg-azure-lt d-inline-flex align-items-center gap-2';
+        chip.textContent = person.name;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'btn btn-sm btn-ghost-secondary p-0 px-1';
+        remove.textContent = 'x';
+        remove.onclick = () => {
+          selected.delete(person.id);
+          renderSelected();
+        };
+        chip.appendChild(remove);
+        selectedEl.appendChild(chip);
+
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'selectedIds';
+        hidden.value = person.id;
+        hiddenInputsEl.appendChild(hidden);
+      });
+    };
+
+    const renderResults = (items) => {
+      resultsEl.innerHTML = '';
+      if (!items.length) {
+        resultsEl.classList.add('d-none');
+        return;
+      }
+      items.forEach((item) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'list-group-item list-group-item-action d-flex align-items-center gap-2';
+        btn.innerHTML = `${item.photoUrl ? `<span class="avatar avatar-sm" style="background-image:url('${item.photoUrl}'); background-size:cover; background-position:center;"></span>` : `<span class="avatar avatar-sm">${(item.name || '?').charAt(0).toUpperCase()}</span>`}<span>${item.name}</span><span class="text-secondary small ms-auto">${item.membershipType || ''}</span>`;
+        btn.onclick = () => {
+          selected.set(item.id, item);
+          renderSelected();
+          searchInput.value = '';
+          renderResults([]);
+          searchInput.focus();
+        };
+        resultsEl.appendChild(btn);
+      });
+      resultsEl.classList.remove('d-none');
+    };
+
+    const runSearch = async () => {
+      const query = searchInput.value.trim();
+      if (!query) {
+        renderResults([]);
+        return;
+      }
+      requestCounter += 1;
+      const token = requestCounter;
+      const resp = await fetch(`/api/people/search?q=${encodeURIComponent(query)}&limit=8`);
+      const data = await resp.json();
+      if (token !== requestCounter) return;
+      const items = (data.items || []).filter((item) => !selected.has(item.id));
+      renderResults(items);
+    };
+
+    searchInput.addEventListener('input', () => {
+      window.clearTimeout(searchInput._debounceTimer);
+      searchInput._debounceTimer = window.setTimeout(runSearch, 180);
+    });
+
+    document.addEventListener('click', (event) => {
+      if (!resultsEl.contains(event.target) && event.target !== searchInput) {
+        resultsEl.classList.add('d-none');
+      }
+    });
+  })();
+</script>
 
 <%- include('partials-footer') %>

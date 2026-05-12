@@ -2095,6 +2095,90 @@ app.get('/people/new', async (req, res, next) => {
   }
 });
 
+app.get('/api/people/search', async (req, res, next) => {
+  try {
+    const query = normalize(req.query.q).toLowerCase();
+    const limit = Math.min(25, Math.max(1, Number.parseInt(normalize(req.query.limit), 10) || 10));
+    const data = await readData();
+
+    if (!query) {
+      return res.json({ items: [] });
+    }
+
+    const items = sortByName(data.people)
+      .filter((person) =>
+        [person.name, person.phone, person.email, person.membershipType, person.sectionId]
+          .join(' ')
+          .toLowerCase()
+          .includes(query)
+      )
+      .slice(0, limit)
+      .map((person) => ({
+        id: person.id,
+        name: normalize(person.name) || 'Unnamed',
+        membershipType: normalizeMembershipType(person.membershipType),
+        photoUrl: normalizePhotoUrl(person.photoUrl)
+      }));
+
+    return res.json({ items });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/people/bulk-update', requireAdmin, async (req, res, next) => {
+  try {
+    const selectedIds = normalizePersonRelationIds(req.body.selectedIds);
+    const membershipType = normalizeMembershipTypeFilter(req.body.bulkMembershipType);
+    const cadenceRaw = normalize(req.body.bulkFollowUpCadenceMonths);
+    const cadenceProvided = cadenceRaw !== '';
+    const cadenceValue = normalizePositiveInt(cadenceRaw, 0);
+    const addTag = normalize(req.body.bulkAddTag);
+    const removeTag = normalize(req.body.bulkRemoveTag);
+    const returnTo = normalize(req.body.returnTo) || '/people';
+
+    if (!selectedIds.length) {
+      return res.redirect(returnTo.startsWith('/') ? returnTo : '/people');
+    }
+
+    await updateData((data) => {
+      data.people.forEach((person) => {
+        if (!selectedIds.includes(person.id)) return;
+
+        if (membershipType) {
+          person.membershipType = membershipType;
+        }
+
+        if (cadenceProvided) {
+          person.followUpCadenceMonths = normalizeFollowUpCadenceMonths(
+            cadenceValue,
+            person.membershipType
+          );
+        }
+
+        if (addTag) {
+          person.tags = parseTagsInput([...(person.tags || []), addTag].join(', '));
+        }
+
+        if (removeTag) {
+          person.tags = normalizePersonTags(person.tags).filter(
+            (tag) => normalize(tag).toLowerCase() !== removeTag.toLowerCase()
+          );
+        }
+
+        person.updatedAt = new Date().toISOString();
+        syncFollowUpsForPerson(data, person);
+      });
+
+      return data;
+    });
+
+    return res.redirect(returnTo.startsWith('/') ? returnTo : '/people');
+  } catch (err) {
+    return next(err);
+  }
+});
+
 app.post('/people/filters', async (req, res, next) => {
   try {
     const filter = normalizeSmartPeopleFilter({
