@@ -448,6 +448,11 @@ function normalizeFollowupsFilter(value) {
   return normalize(value) === 'open' ? 'open' : 'all';
 }
 
+function normalizePeopleStatusFilter(value) {
+  const status = normalize(value);
+  return ['active', 'archived', 'all'].includes(status) ? status : 'active';
+}
+
 function normalizeUrlWithScheme(value) {
   const raw = normalize(value);
   if (!raw) return '';
@@ -1917,6 +1922,7 @@ app.get('/people', async (req, res, next) => {
     let followups = normalizeFollowupsFilter(req.query.followups);
     let membershipTypeFilter = normalizeMembershipTypeFilter(req.query.membershipType);
     let tagFilter = normalize(req.query.tag);
+    let peopleStatusFilter = normalizePeopleStatusFilter(req.query.peopleStatus);
 
     if (selectedSmartFilter) {
       q = selectedSmartFilter.q;
@@ -1974,6 +1980,12 @@ app.get('/people', async (req, res, next) => {
       );
     }
 
+    if (peopleStatusFilter === 'active') {
+      people = people.filter((person) => !normalize(person.archivedAt));
+    } else if (peopleStatusFilter === 'archived') {
+      people = people.filter((person) => Boolean(normalize(person.archivedAt)));
+    }
+
     const totalFilteredPeople = people.length;
     const requestedPageSize = Number.parseInt(normalize(req.query.perPage), 10);
     const pageSize = PEOPLE_DIRECTORY_PAGE_SIZES.includes(requestedPageSize)
@@ -1999,6 +2011,7 @@ app.get('/people', async (req, res, next) => {
       if (followups === 'open') basePaginationParams.set('followups', followups);
       if (membershipTypeFilter) basePaginationParams.set('membershipType', membershipTypeFilter);
       if (tagFilter) basePaginationParams.set('tag', tagFilter);
+      if (peopleStatusFilter !== 'active') basePaginationParams.set('peopleStatus', peopleStatusFilter);
     }
 
     const buildPeoplePageUrl = (pageNumber) => {
@@ -2066,6 +2079,7 @@ app.get('/people', async (req, res, next) => {
       followups,
       membershipTypeFilter,
       tagFilter,
+      peopleStatusFilter,
       availableTags,
       savedPeopleFilters,
       selectedSmartFilterId: selectedSmartFilter?.id || '',
@@ -2530,6 +2544,42 @@ app.post('/people/:id/delete', async (req, res, next) => {
     res.redirect('/people');
   } catch (err) {
     next(err);
+  }
+});
+
+app.post('/people/:id/archive', async (req, res, next) => {
+  try {
+    const returnTo = normalize(req.body.returnTo) || '/people';
+    await updateData((data) => {
+      const person = data.people.find((entry) => entry.id === req.params.id);
+      if (person) {
+        person.archivedAt = new Date().toISOString();
+        person.updatedAt = new Date().toISOString();
+      }
+      return data;
+    });
+
+    return res.redirect(returnTo.startsWith('/') ? returnTo : '/people');
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/people/:id/restore', async (req, res, next) => {
+  try {
+    const returnTo = normalize(req.body.returnTo) || '/people';
+    await updateData((data) => {
+      const person = data.people.find((entry) => entry.id === req.params.id);
+      if (person) {
+        person.archivedAt = '';
+        person.updatedAt = new Date().toISOString();
+      }
+      return data;
+    });
+
+    return res.redirect(returnTo.startsWith('/') ? returnTo : '/people');
+  } catch (err) {
+    return next(err);
   }
 });
 

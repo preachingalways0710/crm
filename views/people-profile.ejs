@@ -15,7 +15,11 @@
         <% } %>
         <h3 class="m-0"><%= person.name %></h3>
         <p class="text-secondary mb-2"><%= person.email || 'No email' %></p>
-        <span class="badge bg-green-lt">Active</span>
+        <% if (person.archivedAt) { %>
+          <span class="badge bg-yellow-lt">Archived</span>
+        <% } else { %>
+          <span class="badge bg-green-lt">Active</span>
+        <% } %>
         <span class="badge bg-azure-lt"><%= person.membershipType || 'Convidado' %></span>
         <% if ((person.tags || []).length) { %>
           <div class="mt-2 d-flex flex-wrap justify-content-center gap-1">
@@ -37,6 +41,17 @@
       <div class="card-body border-top d-grid gap-2">
         <a class="btn btn-outline-primary" href="/people/<%= person.id %>?tab=followups">Add follow-up</a>
         <a class="btn btn-outline-primary" href="/people/<%= person.id %>?tab=visits">Log visit</a>
+        <% if (person.archivedAt) { %>
+          <form method="post" action="/people/<%= person.id %>/restore">
+            <input type="hidden" name="returnTo" value="/people/<%= person.id %>?tab=profile" />
+            <button type="submit" class="btn btn-outline-secondary w-100">Restore person</button>
+          </form>
+        <% } else { %>
+          <form method="post" action="/people/<%= person.id %>/archive" onsubmit="return confirm('Archive this person? You can restore later.');">
+            <input type="hidden" name="returnTo" value="/people/<%= person.id %>?tab=profile" />
+            <button type="submit" class="btn btn-outline-secondary w-100">Archive person</button>
+          </form>
+        <% } %>
         <form method="post" action="/people/<%= person.id %>/delete" onsubmit="return confirm('Delete this person?');">
           <button type="submit" class="btn btn-outline-danger w-100">Delete person</button>
         </form>
