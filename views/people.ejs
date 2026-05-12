@@ -80,6 +80,11 @@
         <table class="table table-vcenter">
           <thead>
             <tr>
+              <th class="w-1">
+                <label class="form-check m-0">
+                  <input class="form-check-input" type="checkbox" id="peopleSelectAll" />
+                </label>
+              </th>
               <th>Name</th>
               <th>Contact</th>
               <th>Birthday</th>
@@ -91,11 +96,23 @@
           </thead>
           <tbody>
             <% if (!people.length) { %>
-              <tr><td colspan="7" class="text-secondary">No people added yet.</td></tr>
+              <tr><td colspan="8" class="text-secondary">No people added yet.</td></tr>
             <% } %>
 
             <% people.forEach((person) => { %>
               <tr>
+                <td>
+                  <label class="form-check m-0">
+                    <input
+                      class="form-check-input people-row-select"
+                      type="checkbox"
+                      value="<%= person.id %>"
+                      data-person-name="<%= person.name %>"
+                      data-person-membership="<%= person.membershipType || '' %>"
+                      data-person-photo-url="<%= person.photoUrl || '' %>"
+                    />
+                  </label>
+                </td>
                 <td>
                   <% if (person.photoUrl) { %>
                     <div class="mb-1"><span class="avatar avatar-md" style="background-image: url('<%= person.photoUrl %>'); background-size: cover; background-position: center;"></span></div>
@@ -245,6 +262,8 @@
     const resultsEl = document.getElementById('bulkPeopleResults');
     const selectedEl = document.getElementById('bulkPeopleSelected');
     const hiddenInputsEl = document.getElementById('bulkPeopleInputs');
+    const selectAllEl = document.getElementById('peopleSelectAll');
+    const rowCheckboxes = Array.from(document.querySelectorAll('.people-row-select'));
     if (!searchInput || !resultsEl || !selectedEl || !hiddenInputsEl) return;
 
     const selected = new Map();
@@ -253,6 +272,15 @@
     const renderSelected = () => {
       selectedEl.innerHTML = '';
       hiddenInputsEl.innerHTML = '';
+      rowCheckboxes.forEach((checkbox) => {
+        checkbox.checked = selected.has(checkbox.value);
+      });
+      if (selectAllEl) {
+        const total = rowCheckboxes.length;
+        const checked = rowCheckboxes.filter((entry) => entry.checked).length;
+        selectAllEl.checked = total > 0 && checked === total;
+        selectAllEl.indeterminate = checked > 0 && checked < total;
+      }
       selected.forEach((person) => {
         const chip = document.createElement('span');
         chip.className = 'badge bg-azure-lt d-inline-flex align-items-center gap-2';
@@ -318,6 +346,41 @@
       window.clearTimeout(searchInput._debounceTimer);
       searchInput._debounceTimer = window.setTimeout(runSearch, 180);
     });
+
+    rowCheckboxes.forEach((checkbox) => {
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          selected.set(checkbox.value, {
+            id: checkbox.value,
+            name: checkbox.dataset.personName || 'Unnamed',
+            membershipType: checkbox.dataset.personMembership || '',
+            photoUrl: checkbox.dataset.personPhotoUrl || ''
+          });
+        } else {
+          selected.delete(checkbox.value);
+        }
+        renderSelected();
+      });
+    });
+
+    if (selectAllEl) {
+      selectAllEl.addEventListener('change', () => {
+        rowCheckboxes.forEach((checkbox) => {
+          checkbox.checked = selectAllEl.checked;
+          if (selectAllEl.checked) {
+            selected.set(checkbox.value, {
+              id: checkbox.value,
+              name: checkbox.dataset.personName || 'Unnamed',
+              membershipType: checkbox.dataset.personMembership || '',
+              photoUrl: checkbox.dataset.personPhotoUrl || ''
+            });
+          } else {
+            selected.delete(checkbox.value);
+          }
+        });
+        renderSelected();
+      });
+    }
 
     document.addEventListener('click', (event) => {
       if (!resultsEl.contains(event.target) && event.target !== searchInput) {
