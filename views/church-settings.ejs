@@ -114,7 +114,11 @@
               <input class="form-control" name="todoistProjectId" value="<%= integrationSettings.todoistProjectId || '' %>" placeholder="e.g. 2312345678" />
             </div>
             <div class="col-12">
-              <div class="form-hint">Google Calendar uses one-click event links from the Follow-ups page.</div>
+              <label class="form-label">Things Email (Mail to Things)</label>
+              <input class="form-control" name="thingsEmail" value="<%= integrationSettings.thingsEmail || '' %>" placeholder="add-to-things-xxxx@things.email" />
+            </div>
+            <div class="col-12">
+              <div class="form-hint">Google Calendar and Things use one-click actions from the Follow-ups page.</div>
             </div>
           </div>
         </div>

@@ -180,7 +180,8 @@ function hydrateIntegrationSettings(settings) {
   const raw = settings && typeof settings === 'object' ? settings : {};
   return {
     todoistApiToken: normalize(raw.todoistApiToken),
-    todoistProjectId: normalize(raw.todoistProjectId)
+    todoistProjectId: normalize(raw.todoistProjectId),
+    thingsEmail: normalize(raw.thingsEmail)
   };
 }
 
@@ -1140,6 +1141,24 @@ function buildGoogleCalendarFollowUpUrl(person, followUp) {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+function buildThingsMailtoUrl(thingsEmail, person, followUp) {
+  const target = normalize(thingsEmail);
+  if (!target) return '';
+  const subject = `${normalize(followUp?.title) || 'Follow-up'} - ${normalize(person?.name) || 'Member'}`;
+  const lines = [
+    `Person: ${normalize(person?.name) || '-'}`,
+    `Due: ${toIsoDate(followUp?.dueDate) || '-'}`,
+    `Contact: ${followUpContactMethodLabels[normalizeFollowUpContactMethod(followUp?.contactMethod)] || 'Visit'}`,
+    '',
+    normalize(followUp?.notes)
+  ].filter((line, index) => line || index < 4);
+  const params = new URLSearchParams({
+    subject,
+    body: lines.join('\n')
+  });
+  return `mailto:${target}?${params.toString()}`;
+}
+
 function buildFollowupsReturnTo(status, stage, view, q = '', due = 'all') {
   const params = new URLSearchParams({
     status: normalize(status) || 'open',
@@ -1812,7 +1831,8 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       data.settings = data.settings || {};
       data.settings.integrations = hydrateIntegrationSettings({
         todoistApiToken: req.body.todoistApiToken,
-        todoistProjectId: req.body.todoistProjectId
+        todoistProjectId: req.body.todoistProjectId,
+        thingsEmail: req.body.thingsEmail
       });
       const previousChurchSettings = hydrateChurchSettings((data.settings || {}).church);
 
@@ -2587,6 +2607,7 @@ app.get('/followups', async (req, res, next) => {
           dueDate: dueDate || '',
           dueBucket,
           googleCalendarUrl: buildGoogleCalendarFollowUpUrl(person, item),
+          thingsMailtoUrl: buildThingsMailtoUrl(integrationSettings.thingsEmail, person, item),
           todoistSynced: isFollowUpTodoistSynced(item),
           personName: person?.name || 'Unknown person',
           personLink: person ? `/people/${person.id}?tab=followups` : '/people'
@@ -2647,6 +2668,7 @@ app.get('/followups', async (req, res, next) => {
       board,
       dueGroups,
       todoistEnabled: Boolean(integrationSettings.todoistApiToken),
+      thingsEnabled: Boolean(integrationSettings.thingsEmail),
       todoistStatus,
       todoistCount,
       todoistSkipped,

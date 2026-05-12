@@ -150,6 +150,9 @@
               <td><%= item.notes || '-' %></td>
               <td>
                 <a class="btn btn-outline-secondary btn-sm mb-2 w-100" href="<%= item.googleCalendarUrl %>" target="_blank" rel="noopener noreferrer">Google Calendar</a>
+                <% if (thingsEnabled && item.thingsMailtoUrl) { %>
+                  <a class="btn btn-outline-secondary btn-sm mb-2 w-100" href="<%= item.thingsMailtoUrl %>">Send To Things</a>
+                <% } %>
                 <% if (todoistEnabled) { %>
                   <% if (item.todoistSynced) { %>
                     <button class="btn btn-outline-secondary btn-sm mb-2 w-100" type="button" disabled>Already In Todoist</button>
@@ -212,6 +215,9 @@
                     <div class="text-secondary small">Due: <%= item.dueDate || '-' %></div>
                     <div class="text-secondary small mb-2"><%= item.notes || 'No notes' %></div>
                     <a class="btn btn-outline-secondary btn-sm w-100 mb-2" href="<%= item.googleCalendarUrl %>" target="_blank" rel="noopener noreferrer">Google Calendar</a>
+                    <% if (thingsEnabled && item.thingsMailtoUrl) { %>
+                      <a class="btn btn-outline-secondary btn-sm w-100 mb-2" href="<%= item.thingsMailtoUrl %>">Send To Things</a>
+                    <% } %>
                     <% if (todoistEnabled) { %>
                       <% if (item.todoistSynced) { %>
                         <button class="btn btn-outline-secondary btn-sm w-100 mb-2" type="button" disabled>Already In Todoist</button>
