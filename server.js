@@ -1401,21 +1401,25 @@ function buildGoogleCalendarFollowUpUrl(person, followUp) {
 }
 
 function buildThingsMailtoUrl(thingsEmail, person, followUp) {
-  const title = `${normalize(followUp?.title) || 'Follow-up'} - ${normalize(person?.name) || 'Member'}`;
+  const contactLabel = followUpContactMethodLabels[normalizeFollowUpContactMethod(followUp?.contactMethod)] || 'Visit';
+  const personName = normalize(person?.name) || 'Member';
+  const taskTitle = normalize(followUp?.title) || 'Follow-up';
+  const title = `${contactLabel}: ${taskTitle} - ${personName}`;
   const lines = [
-    `Person: ${normalize(person?.name) || '-'}`,
+    `Person: ${personName || '-'}`,
     `Due: ${toIsoDate(followUp?.dueDate) || '-'}`,
-    `Contact: ${followUpContactMethodLabels[normalizeFollowUpContactMethod(followUp?.contactMethod)] || 'Visit'}`,
+    `Contact: ${contactLabel}`,
     '',
     normalize(followUp?.notes)
   ].filter((line, index) => line || index < 4);
   const thingsParams = new URLSearchParams({
     title,
-    notes: lines.join('\n')
+    notes: lines.join('\n'),
+    tags: `${normalizeFollowUpContactMethod(followUp?.contactMethod)},followup`
   });
   const dueDate = toIsoDate(followUp?.dueDate);
   if (dueDate) thingsParams.set('when', dueDate);
-  const thingsUrl = `things:///add?${thingsParams.toString()}`;
+  const thingsUrl = `things:///add?${thingsParams.toString().replace(/\+/g, '%20')}`;
 
   const target = normalize(thingsEmail);
   if (!target) return thingsUrl;
