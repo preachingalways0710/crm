@@ -1304,6 +1304,8 @@ function syncFollowUpsForPerson(data, person, now = new Date()) {
   const isGuest = normalizedMembership === 'convidado';
   if (isGuest) {
     const anchorDate = toIsoDate(person.createdAt || nowIso) || todayIso;
+    const guestAgeDays = diffDays(new Date(todayIso), new Date(anchorDate));
+    if (guestAgeDays > 45) return;
     guestFollowUpSequenceDays.forEach((offsetDays) => {
       const autoKey = `guest-seq-${offsetDays}`;
       const alreadyExists = personFollowUps.some((entry) => normalize(entry.autoKey) === autoKey);
@@ -3254,6 +3256,7 @@ app.get('/followups', async (req, res, next) => {
     const todoistEndpoint = normalize(req.query.todoistEndpoint);
     const todoistSyncCount = normalizePositiveInt(req.query.todoistSyncCount, 0);
     const todoistSyncSkipped = normalizePositiveInt(req.query.todoistSyncSkipped, 0);
+    const resetStatus = normalize(req.query.reset);
 
     const peopleById = data.people.reduce((acc, person) => {
       acc[person.id] = person;
@@ -3358,12 +3361,33 @@ app.get('/followups', async (req, res, next) => {
       todoistEndpoint,
       todoistSyncCount,
       todoistSyncSkipped,
+      resetStatus,
       q: normalize(req.query.q),
       qEncoded: encodeURIComponent(normalize(req.query.q)),
       followupsReturnTo: buildFollowupsReturnTo(status, stage, view, req.query.q, due)
     });
   } catch (err) {
     next(err);
+  }
+});
+
+app.post('/followups/reset', requireAdmin, async (req, res, next) => {
+  try {
+    const returnTo = normalize(req.body.returnTo) || '/followups?status=open&stage=all&view=table';
+    await updateData((data) => {
+      const nowIso = new Date().toISOString();
+      data.followUps = (data.followUps || []).map((item) => ({
+        ...item,
+        status: 'completed',
+        completedAt: item.completedAt || nowIso,
+        updatedAt: nowIso
+      }));
+      return data;
+    });
+    const separator = returnTo.includes('?') ? '&' : '?';
+    return res.redirect(`${returnTo}${separator}reset=done`);
+  } catch (err) {
+    return next(err);
   }
 });
 

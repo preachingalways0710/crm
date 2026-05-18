@@ -31,10 +31,17 @@
   <% if (todoistStatus === 'sync_completed') { %>
     <div class="alert alert-success m-3 mb-0" role="alert">Synced from Todoist: <%= todoistSyncCount %> follow-ups marked completed, <%= todoistSyncSkipped %> unchanged.</div>
   <% } %>
+  <% if (resetStatus === 'done') { %>
+    <div class="alert alert-success m-3 mb-0" role="alert">Follow-up queue reset complete.</div>
+  <% } %>
   <div class="card-header">
     <h3 class="card-title">Global Follow-up Queue</h3>
     <div class="card-actions">
       <span class="badge bg-secondary-lt"><%= queue.length %> items</span>
+      <form method="post" action="/followups/reset" class="d-inline-block ms-2" onsubmit="return confirm('Reset follow-up queue now?');">
+        <input type="hidden" name="returnTo" value="<%= followupsReturnTo %>" />
+        <button class="btn btn-outline-danger btn-sm" type="submit">Reset Queue</button>
+      </form>
     </div>
   </div>
   <% if (status !== 'completed') { %>
