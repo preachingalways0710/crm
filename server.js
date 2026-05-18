@@ -1401,9 +1401,7 @@ function buildGoogleCalendarFollowUpUrl(person, followUp) {
 }
 
 function buildThingsMailtoUrl(thingsEmail, person, followUp) {
-  const target = normalize(thingsEmail);
-  if (!target) return '';
-  const subject = `${normalize(followUp?.title) || 'Follow-up'} - ${normalize(person?.name) || 'Member'}`;
+  const title = `${normalize(followUp?.title) || 'Follow-up'} - ${normalize(person?.name) || 'Member'}`;
   const lines = [
     `Person: ${normalize(person?.name) || '-'}`,
     `Due: ${toIsoDate(followUp?.dueDate) || '-'}`,
@@ -1411,11 +1409,23 @@ function buildThingsMailtoUrl(thingsEmail, person, followUp) {
     '',
     normalize(followUp?.notes)
   ].filter((line, index) => line || index < 4);
-  const params = new URLSearchParams({
-    subject,
+  const thingsParams = new URLSearchParams({
+    title,
+    notes: lines.join('\n')
+  });
+  const dueDate = toIsoDate(followUp?.dueDate);
+  if (dueDate) thingsParams.set('when', dueDate);
+  const thingsUrl = `things:///add?${thingsParams.toString()}`;
+
+  const target = normalize(thingsEmail);
+  if (!target) return thingsUrl;
+
+  // Keep mailto as a fallback destination if the app cannot handle the Things URL scheme.
+  const mailtoParams = new URLSearchParams({
+    subject: title,
     body: lines.join('\n')
   });
-  return `mailto:${target}?${params.toString()}`;
+  return `${thingsUrl}&reveal=true&x-fallback-url=${encodeURIComponent(`mailto:${target}?${mailtoParams.toString()}`)}`;
 }
 
 function buildFollowupsReturnTo(status, stage, view, q = '', due = 'all') {
@@ -3352,7 +3362,7 @@ app.get('/followups', async (req, res, next) => {
       dueGroups,
       calendarEnabled: integrationSettings.calendarEnabled,
       todoistEnabled: integrationSettings.todoistEnabled && Boolean(integrationSettings.todoistApiToken),
-      thingsEnabled: integrationSettings.thingsEnabled && Boolean(integrationSettings.thingsEmail),
+      thingsEnabled: integrationSettings.thingsEnabled,
       todoistStatus,
       todoistCount,
       todoistSkipped,

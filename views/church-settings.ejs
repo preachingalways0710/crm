@@ -175,8 +175,8 @@
                   <input class="form-check-input" type="checkbox" name="thingsEnabled" <%= integrationSettings.thingsEnabled ? 'checked' : '' %> />
                 </label>
               </div>
-              <div class="text-secondary small mb-2">Enable Mail to Things action.</div>
-              <label class="form-label small">Things Email</label>
+              <div class="text-secondary small mb-2">Enable direct add to Things app.</div>
+              <label class="form-label small">Things Email (fallback, optional)</label>
               <input class="form-control form-control-sm" name="thingsEmail" value="<%= integrationSettings.thingsEmail || '' %>" placeholder="add-to-things-xxxx@things.email" />
             </div>
           </div>
