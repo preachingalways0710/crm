@@ -194,14 +194,242 @@ function hydrateChurchSettings(settings) {
 
 function hydrateIntegrationSettings(settings) {
   const raw = settings && typeof settings === 'object' ? settings : {};
+  const rawEventMap = raw.googleCalendarEventMap && typeof raw.googleCalendarEventMap === 'object' ? raw.googleCalendarEventMap : {};
+  const eventMap = Object.fromEntries(
+    Object.entries(rawEventMap).filter(([localId, remoteId]) => normalize(localId) && normalize(remoteId))
+  );
+
   return {
     calendarEnabled: raw.calendarEnabled === false ? false : true,
+    googleCalendarEnabled: normalize(raw.googleCalendarEnabled) === 'true' || raw.googleCalendarEnabled === true,
+    googleCalendarClientId: normalize(raw.googleCalendarClientId),
+    googleCalendarClientSecret: normalize(raw.googleCalendarClientSecret),
+    googleCalendarRedirectUri: normalize(raw.googleCalendarRedirectUri),
+    googleCalendarCalendarId: normalize(raw.googleCalendarCalendarId) || 'primary',
+    googleCalendarAccessToken: normalize(raw.googleCalendarAccessToken),
+    googleCalendarRefreshToken: normalize(raw.googleCalendarRefreshToken),
+    googleCalendarTokenExpiry: normalize(raw.googleCalendarTokenExpiry),
+    googleCalendarConnectedAt: normalize(raw.googleCalendarConnectedAt),
+    googleCalendarEventMap: eventMap,
     todoistEnabled: normalize(raw.todoistEnabled) === 'true' || raw.todoistEnabled === true,
     todoistApiToken: normalize(raw.todoistApiToken),
     todoistProjectId: normalize(raw.todoistProjectId),
     thingsEnabled: raw.thingsEnabled === false ? false : true,
     thingsEmail: normalize(raw.thingsEmail)
   };
+}
+
+function resolveGoogleCalendarRedirectUri(req, integrationSettings) {
+  const configured = normalize(integrationSettings.googleCalendarRedirectUri);
+  if (configured) return configured;
+  return `${req.protocol}://${req.get('host')}/auth/google-calendar/callback`;
+}
+
+function canUseGoogleCalendarSync(integrationSettings) {
+  return Boolean(
+    integrationSettings.googleCalendarEnabled &&
+      integrationSettings.googleCalendarClientId &&
+      integrationSettings.googleCalendarClientSecret &&
+      integrationSettings.googleCalendarRefreshToken
+  );
+}
+
+async function googleTokenRequest(params) {
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params).toString()
+  });
+  const body = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const detail = normalize(body.error_description || body.error || response.statusText) || 'token_request_failed';
+    throw new Error(`Google token request failed (${response.status}): ${detail}`);
+  }
+
+  return body;
+}
+
+async function getGoogleCalendarAccessToken(integrationSettings) {
+  const expiry = Number.parseInt(integrationSettings.googleCalendarTokenExpiry, 10);
+  const hasValidToken =
+    integrationSettings.googleCalendarAccessToken && Number.isFinite(expiry) && Date.now() < expiry - 60000;
+
+  if (hasValidToken) {
+    return { accessToken: integrationSettings.googleCalendarAccessToken, integrationPatch: null };
+  }
+
+  if (!integrationSettings.googleCalendarRefreshToken) {
+    throw new Error('Google Calendar is not connected yet.');
+  }
+
+  const refreshed = await googleTokenRequest({
+    client_id: integrationSettings.googleCalendarClientId,
+    client_secret: integrationSettings.googleCalendarClientSecret,
+    refresh_token: integrationSettings.googleCalendarRefreshToken,
+    grant_type: 'refresh_token'
+  });
+
+  const nextExpiryMs = Date.now() + Number(refreshed.expires_in || 3600) * 1000;
+  const patch = {
+    googleCalendarAccessToken: normalize(refreshed.access_token),
+    googleCalendarTokenExpiry: String(nextExpiryMs)
+  };
+
+  return { accessToken: patch.googleCalendarAccessToken, integrationPatch: patch };
+}
+
+async function googleCalendarApiRequest({ accessToken, method, calendarId, eventId, body }) {
+  const encodedCalendarId = encodeURIComponent(calendarId || 'primary');
+  const base = `https://www.googleapis.com/calendar/v3/calendars/${encodedCalendarId}/events`;
+  const url = eventId ? `${base}/${encodeURIComponent(eventId)}` : base;
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+
+  if (!response.ok) {
+    let message = response.statusText;
+    const payload = await response.json().catch(() => null);
+    if (payload?.error?.message) message = payload.error.message;
+    const error = new Error(`Google Calendar API failed (${response.status}): ${message}`);
+    error.status = response.status;
+    throw error;
+  }
+
+  if (response.status === 204) return null;
+  return response.json().catch(() => null);
+}
+
+function buildGoogleCalendarEventPayload(event) {
+  const start = normalize(event.start);
+  const end = normalize(event.end);
+  const startIsDateOnly = start.length === 10;
+  const endIsDateOnly = end.length === 10;
+
+  const payload = {
+    summary: normalize(event.title) || 'CRM Event',
+    description: normalize(event.description),
+    extendedProperties: {
+      private: {
+        crmEventId: event.id
+      }
+    }
+  };
+
+  if (startIsDateOnly) {
+    payload.start = { date: start };
+    if (endIsDateOnly && end) payload.end = { date: end };
+  } else {
+    payload.start = { dateTime: start };
+    if (end) payload.end = { dateTime: end };
+  }
+
+  return payload;
+}
+
+async function syncEventToGoogleCalendar(event) {
+  const data = await readData();
+  const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+  if (!canUseGoogleCalendarSync(integrationSettings)) {
+    return { synced: false, reason: 'google_calendar_disabled_or_not_connected' };
+  }
+
+  const { accessToken, integrationPatch } = await getGoogleCalendarAccessToken(integrationSettings);
+  const localMap = { ...(integrationSettings.googleCalendarEventMap || {}) };
+  const mappedGoogleEventId = normalize(localMap[event.id]);
+  const payload = buildGoogleCalendarEventPayload(event);
+  let remoteEvent;
+
+  if (mappedGoogleEventId) {
+    try {
+      remoteEvent = await googleCalendarApiRequest({
+        accessToken,
+        method: 'PUT',
+        calendarId: integrationSettings.googleCalendarCalendarId,
+        eventId: mappedGoogleEventId,
+        body: payload
+      });
+    } catch (error) {
+      if (error.status === 404) {
+        remoteEvent = await googleCalendarApiRequest({
+          accessToken,
+          method: 'POST',
+          calendarId: integrationSettings.googleCalendarCalendarId,
+          body: payload
+        });
+      } else {
+        throw error;
+      }
+    }
+  } else {
+    remoteEvent = await googleCalendarApiRequest({
+      accessToken,
+      method: 'POST',
+      calendarId: integrationSettings.googleCalendarCalendarId,
+      body: payload
+    });
+  }
+
+  localMap[event.id] = remoteEvent?.id || mappedGoogleEventId;
+
+  await updateData((nextData) => {
+    nextData.settings = nextData.settings || {};
+    const existing = hydrateIntegrationSettings((nextData.settings || {}).integrations);
+    nextData.settings.integrations = hydrateIntegrationSettings({
+      ...existing,
+      ...integrationPatch,
+      googleCalendarEventMap: {
+        ...(existing.googleCalendarEventMap || {}),
+        ...localMap
+      }
+    });
+    return nextData;
+  });
+
+  return { synced: true, remoteEventId: localMap[event.id] };
+}
+
+async function deleteEventFromGoogleCalendar(localEventId) {
+  const data = await readData();
+  const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+  if (!canUseGoogleCalendarSync(integrationSettings)) return { synced: false };
+
+  const localMap = { ...(integrationSettings.googleCalendarEventMap || {}) };
+  const mappedGoogleEventId = normalize(localMap[localEventId]);
+  if (!mappedGoogleEventId) return { synced: false, reason: 'not_mapped' };
+
+  const { accessToken, integrationPatch } = await getGoogleCalendarAccessToken(integrationSettings);
+  try {
+    await googleCalendarApiRequest({
+      accessToken,
+      method: 'DELETE',
+      calendarId: integrationSettings.googleCalendarCalendarId,
+      eventId: mappedGoogleEventId
+    });
+  } catch (error) {
+    if (error.status !== 404 && error.status !== 410) {
+      throw error;
+    }
+  }
+
+  delete localMap[localEventId];
+  await updateData((nextData) => {
+    nextData.settings = nextData.settings || {};
+    const existing = hydrateIntegrationSettings((nextData.settings || {}).integrations);
+    nextData.settings.integrations = hydrateIntegrationSettings({
+      ...existing,
+      ...integrationPatch,
+      googleCalendarEventMap: localMap
+    });
+    return nextData;
+  });
+
+  return { synced: true };
 }
 
 function maskSecret(value) {
@@ -454,6 +682,11 @@ function normalizeFollowupsFilter(value) {
 function normalizePeopleStatusFilter(value) {
   const status = normalize(value);
   return ['active', 'archived', 'all'].includes(status) ? status : 'active';
+}
+
+function normalizeTempContactStatus(value) {
+  const status = normalize(value);
+  return ['open', 'converted', 'closed'].includes(status) ? status : 'open';
 }
 
 function normalizeUrlWithScheme(value) {
@@ -1811,6 +2044,8 @@ app.get('/settings/church', async (req, res, next) => {
       churchSettings,
       integrationSettings,
       maskedTodoistToken: maskSecret(integrationSettings.todoistApiToken),
+      maskedGoogleClientSecret: maskSecret(integrationSettings.googleCalendarClientSecret),
+      googleCalendarConnected: Boolean(integrationSettings.googleCalendarRefreshToken),
       saveStatus,
       geocodeStatus,
       isReadOnly,
@@ -1861,6 +2096,23 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
       data.settings = data.settings || {};
       data.settings.integrations = hydrateIntegrationSettings({
         calendarEnabled: req.body.calendarEnabled === 'on',
+        googleCalendarEnabled: req.body.googleCalendarEnabled === 'on',
+        googleCalendarClientId: req.body.googleCalendarClientId,
+        googleCalendarClientSecret: req.body.googleCalendarClientSecret,
+        googleCalendarRedirectUri: req.body.googleCalendarRedirectUri,
+        googleCalendarCalendarId: req.body.googleCalendarCalendarId,
+        googleCalendarAccessToken: req.body.googleCalendarAccessToken,
+        googleCalendarRefreshToken: req.body.googleCalendarRefreshToken,
+        googleCalendarTokenExpiry: req.body.googleCalendarTokenExpiry,
+        googleCalendarConnectedAt: req.body.googleCalendarConnectedAt,
+        googleCalendarEventMap: (() => {
+          try {
+            const parsed = JSON.parse(normalize(req.body.googleCalendarEventMap) || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+          } catch {
+            return {};
+          }
+        })(),
         todoistEnabled: req.body.todoistEnabled === 'on',
         todoistApiToken: req.body.todoistApiToken,
         todoistProjectId: req.body.todoistProjectId,
@@ -1913,6 +2165,83 @@ app.post('/settings/church', requireAdmin, async (req, res, next) => {
     return res.redirect(`/settings/church?${params.toString()}`);
   } catch (err) {
     return next(err);
+  }
+});
+
+app.get('/auth/google-calendar/connect', requireAdmin, async (req, res, next) => {
+  try {
+    const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+    if (!integrationSettings.googleCalendarClientId || !integrationSettings.googleCalendarClientSecret) {
+      return res.redirect('/settings/church?tab=integrations&saved=0');
+    }
+
+    const state = crypto.randomUUID();
+    req.session.googleCalendarOAuthState = state;
+
+    const redirectUri = resolveGoogleCalendarRedirectUri(req, integrationSettings);
+    const params = new URLSearchParams({
+      client_id: integrationSettings.googleCalendarClientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'https://www.googleapis.com/auth/calendar.events',
+      access_type: 'offline',
+      include_granted_scopes: 'true',
+      prompt: 'consent',
+      state
+    });
+
+    res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/auth/google-calendar/callback', requireAdmin, async (req, res, next) => {
+  try {
+    const returnedState = normalize(req.query.state);
+    const expectedState = normalize(req.session.googleCalendarOAuthState);
+    delete req.session.googleCalendarOAuthState;
+
+    if (!returnedState || !expectedState || returnedState !== expectedState) {
+      return res.redirect('/settings/church?tab=integrations&saved=0');
+    }
+
+    const authCode = normalize(req.query.code);
+    if (!authCode) {
+      return res.redirect('/settings/church?tab=integrations&saved=0');
+    }
+
+    const data = await readData();
+    const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
+    const redirectUri = resolveGoogleCalendarRedirectUri(req, integrationSettings);
+    const tokenResponse = await googleTokenRequest({
+      code: authCode,
+      client_id: integrationSettings.googleCalendarClientId,
+      client_secret: integrationSettings.googleCalendarClientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code'
+    });
+
+    const nextExpiryMs = Date.now() + Number(tokenResponse.expires_in || 3600) * 1000;
+    await updateData((nextData) => {
+      nextData.settings = nextData.settings || {};
+      const existing = hydrateIntegrationSettings((nextData.settings || {}).integrations);
+      nextData.settings.integrations = hydrateIntegrationSettings({
+        ...existing,
+        googleCalendarEnabled: true,
+        googleCalendarRedirectUri: integrationSettings.googleCalendarRedirectUri || redirectUri,
+        googleCalendarAccessToken: normalize(tokenResponse.access_token),
+        googleCalendarRefreshToken: normalize(tokenResponse.refresh_token) || existing.googleCalendarRefreshToken,
+        googleCalendarTokenExpiry: String(nextExpiryMs),
+        googleCalendarConnectedAt: new Date().toISOString()
+      });
+      return nextData;
+    });
+
+    res.redirect('/settings/church?tab=integrations&saved=1');
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -2137,6 +2466,185 @@ app.get('/people/new', async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+app.get('/temporary-contacts', async (req, res, next) => {
+  try {
+    const data = await readData();
+    const q = normalize(req.query.q).toLowerCase();
+    const status = normalizeTempContactStatus(req.query.status || 'open');
+
+    const openFollowUpsByTemp = (data.followUps || [])
+      .filter((item) => item.status !== 'completed' && normalize(item.tempContactId))
+      .reduce((acc, item) => {
+        acc[item.tempContactId] = (acc[item.tempContactId] || 0) + 1;
+        return acc;
+      }, {});
+
+    let items = sortByName(data.tempContacts || []).map((entry) => ({
+      ...entry,
+      status: normalizeTempContactStatus(entry.status),
+      openFollowUps: openFollowUpsByTemp[entry.id] || 0
+    }));
+
+    if (status !== 'open') {
+      items = items.filter((entry) => entry.status === status);
+    } else {
+      items = items.filter((entry) => entry.status === 'open');
+    }
+
+    if (q) {
+      items = items.filter((entry) =>
+        [entry.name, entry.names, entry.address, entry.notes]
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
+      );
+    }
+
+    res.render('temporary-contacts', {
+      activeTab: 'temporary_contacts',
+      items,
+      q: normalize(req.query.q),
+      status
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/temporary-contacts', async (req, res, next) => {
+  try {
+    const nowIso = new Date().toISOString();
+    const name = normalize(req.body.name);
+    if (!name) return res.redirect('/temporary-contacts');
+
+    await updateData((data) => {
+      data.tempContacts = data.tempContacts || [];
+      data.tempContacts.push({
+        id: id(),
+        name,
+        names: normalize(req.body.names),
+        address: normalize(req.body.address),
+        phone: normalize(req.body.phone),
+        notes: normalize(req.body.notes),
+        status: 'open',
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
+      return data;
+    });
+
+    return res.redirect('/temporary-contacts');
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/temporary-contacts/:id/followups', async (req, res, next) => {
+  try {
+    const title = normalize(req.body.title);
+    if (!title) return res.redirect('/temporary-contacts');
+    const nowIso = new Date().toISOString();
+
+    await updateData((data) => {
+      data.followUps.push({
+        id: id(),
+        personId: '',
+        tempContactId: req.params.id,
+        title,
+        dueDate: req.body.dueDate || '',
+        notes: normalize(req.body.notes),
+        contactMethod: normalizeFollowUpContactMethod(req.body.contactMethod),
+        status: 'open',
+        stage: normalizeFollowUpStage(req.body.stage),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        stageUpdatedAt: nowIso,
+        completedAt: ''
+      });
+      return data;
+    });
+
+    return res.redirect('/temporary-contacts');
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/temporary-contacts/:id/convert', async (req, res, next) => {
+  try {
+    await updateData((data) => {
+      const temp = (data.tempContacts || []).find((entry) => entry.id === req.params.id);
+      if (!temp) return data;
+      const nowIso = new Date().toISOString();
+      const personId = id();
+      data.people.push({
+        id: personId,
+        name: normalize(temp.name),
+        phone: normalize(temp.phone),
+        email: '',
+        birthday: '',
+        sectionId: '',
+        notes: [normalize(temp.notes), normalize(temp.names) ? `Household names: ${normalize(temp.names)}` : '', normalize(temp.address) ? `Address: ${normalize(temp.address)}` : ''].filter(Boolean).join(' | '),
+        gender: '',
+        ageGroup: '',
+        membershipType: 'Frequentador',
+        occupation: '',
+        language: '',
+        maritalStatus: '',
+        allergies: '',
+        emergencyContact: '',
+        medicalNotes: '',
+        photoUrl: '',
+        address: normalize(temp.address),
+        city: '',
+        state: '',
+        zipCode: '',
+        mapLat: '',
+        mapLng: '',
+        tags: ['temporary-converted'],
+        followUpCadenceMonths: normalizeFollowUpCadenceMonths('', 'Frequentador'),
+        spouseIds: [],
+        parentIds: [],
+        childIds: [],
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
+
+      temp.status = 'converted';
+      temp.updatedAt = nowIso;
+
+      data.followUps.forEach((item) => {
+        if (item.tempContactId === temp.id) {
+          item.personId = personId;
+          item.tempContactId = '';
+          item.updatedAt = nowIso;
+        }
+      });
+      return data;
+    });
+
+    return res.redirect('/temporary-contacts?status=converted');
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/temporary-contacts/:id/close', async (req, res, next) => {
+  try {
+    await updateData((data) => {
+      const temp = (data.tempContacts || []).find((entry) => entry.id === req.params.id);
+      if (temp) {
+        temp.status = 'closed';
+        temp.updatedAt = new Date().toISOString();
+      }
+      return data;
+    });
+    return res.redirect('/temporary-contacts');
+  } catch (err) {
+    return next(err);
   }
 });
 
@@ -2751,10 +3259,15 @@ app.get('/followups', async (req, res, next) => {
       acc[person.id] = person;
       return acc;
     }, {});
+    const tempById = (data.tempContacts || []).reduce((acc, temp) => {
+      acc[temp.id] = temp;
+      return acc;
+    }, {});
 
     let queue = data.followUps
       .map((item) => {
         const person = peopleById[item.personId];
+        const temp = tempById[item.tempContactId];
         const dueDate = toIsoDate(item.dueDate);
         const dueDays = dueDate ? diffDays(new Date(dueDate), new Date()) : null;
         const dueBucket =
@@ -2774,10 +3287,10 @@ app.get('/followups', async (req, res, next) => {
           dueDate: dueDate || '',
           dueBucket,
           googleCalendarUrl: buildGoogleCalendarFollowUpUrl(person, item),
-          thingsMailtoUrl: buildThingsMailtoUrl(integrationSettings.thingsEmail, person, item),
+          thingsMailtoUrl: buildThingsMailtoUrl(integrationSettings.thingsEmail, person || temp, item),
           todoistSynced: isFollowUpTodoistSynced(item),
-          personName: person?.name || 'Unknown person',
-          personLink: person ? `/people/${person.id}?tab=followups` : '/people'
+          personName: person?.name || temp?.name || 'Unknown contact',
+          personLink: person ? `/people/${person.id}?tab=followups` : temp ? '/temporary-contacts' : '/people'
         };
       })
       .sort((a, b) => {
@@ -3572,7 +4085,14 @@ app.post('/api/events', async (req, res, next) => {
       return data;
     });
 
-    res.json({ ok: true, event: payload });
+    let syncResult = null;
+    try {
+      syncResult = await syncEventToGoogleCalendar(payload);
+    } catch (syncError) {
+      syncResult = { synced: false, error: syncError.message };
+    }
+
+    res.json({ ok: true, event: payload, googleCalendar: syncResult });
   } catch (err) {
     next(err);
   }
@@ -3580,12 +4100,20 @@ app.post('/api/events', async (req, res, next) => {
 
 app.delete('/api/events/:id', async (req, res, next) => {
   try {
+    const localEventId = req.params.id;
     await updateData((data) => {
-      data.events = data.events.filter((entry) => entry.id !== req.params.id);
+      data.events = data.events.filter((entry) => entry.id !== localEventId);
       return data;
     });
 
-    res.json({ ok: true });
+    let syncResult = null;
+    try {
+      syncResult = await deleteEventFromGoogleCalendar(localEventId);
+    } catch (syncError) {
+      syncResult = { synced: false, error: syncError.message };
+    }
+
+    res.json({ ok: true, googleCalendar: syncResult });
   } catch (err) {
     next(err);
   }
