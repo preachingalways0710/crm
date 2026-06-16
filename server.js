@@ -176,6 +176,78 @@ function mapProfileSummary(person) {
   };
 }
 
+function personAddressSummary(person) {
+  return [person.address, person.city, person.state, person.zipCode]
+    .map((part) => normalize(part))
+    .filter(Boolean)
+    .join(', ');
+}
+
+function summarizeLatestVisit(visits = []) {
+  if (!Array.isArray(visits) || !visits.length) return null;
+  const sorted = [...visits].sort(
+    (a, b) => new Date(b.date || b.createdAt || 0).getTime() - new Date(a.date || a.createdAt || 0).getTime()
+  );
+  const latest = sorted[0];
+  return latest
+    ? {
+        id: latest.id,
+        date: normalize(latest.date),
+        summary: normalize(latest.summary),
+        nextStep: normalize(latest.nextStep)
+      }
+    : null;
+}
+
+function summarizeNextFollowUp(followUps = []) {
+  if (!Array.isArray(followUps)) return null;
+  const openItems = followUps
+    .filter((entry) => normalize(entry.status) !== 'completed')
+    .sort((a, b) => new Date(a.dueDate || a.createdAt || 0).getTime() - new Date(b.dueDate || b.createdAt || 0).getTime());
+  const next = openItems[0];
+  return next
+    ? {
+        id: next.id,
+        title: normalize(next.title),
+        dueDate: normalize(next.dueDate),
+        stage: normalizeFollowUpStage(next.stage),
+        notes: normalize(next.notes)
+      }
+    : null;
+}
+
+function buildPeopleMapItem(person, followUps = [], visits = []) {
+  const tags = normalizePersonTags(person.tags);
+  const membershipType = normalizeMembershipType(person.membershipType);
+  const phone = normalize(person.phone);
+  const phoneDigits = normalizePhone(phone);
+  const address = personAddressSummary(person);
+
+  return {
+    id: person.id,
+    name: normalize(person.name) || 'Unnamed',
+    membershipType,
+    tags,
+    address,
+    lat: normalizeLatitude(person.mapLat),
+    lng: normalizeLongitude(person.mapLng),
+    phone,
+    phoneDigits,
+    whatsappUrl: phoneDigits ? `https://wa.me/${phoneDigits}` : '',
+    notes: normalize(person.notes),
+    sectionId: normalize(person.sectionId),
+    email: normalize(person.email),
+    photoUrl: normalizePhotoUrl(person.photoUrl),
+    archivedAt: normalize(person.archivedAt),
+    openFollowUps: followUps.filter((entry) => normalize(entry.status) !== 'completed').length,
+    latestVisit: summarizeLatestVisit(visits),
+    nextFollowUp: summarizeNextFollowUp(followUps),
+    profileUrl: `/people/${person.id}`,
+    visitsUrl: `/people/${person.id}?tab=visits`,
+    followUpsUrl: `/people/${person.id}?tab=followups`
+  };
+}
+
 function hydrateChurchSettings(settings) {
   const raw = settings && typeof settings === 'object' ? settings : {};
 
@@ -2451,6 +2523,74 @@ app.get('/people', async (req, res, next) => {
   }
 });
 
+app.get('/people-map', async (req, res, next) => {
+  try {
+    await updateData((state) => {
+      syncAllAutoFollowUps(state);
+      return state;
+    });
+    const data = await readData();
+    const churchSettings = hydrateChurchSettings((data.settings || {}).church);
+    const people = Array.isArray(data.people) ? data.people : [];
+    const followUpsByPerson = (data.followUps || []).reduce((acc, entry) => {
+      const personId = normalize(entry.personId);
+      if (!personId) return acc;
+      acc[personId] = acc[personId] || [];
+      acc[personId].push(entry);
+      return acc;
+    }, {});
+    const visitsByPerson = (data.visits || []).reduce((acc, entry) => {
+      const personId = normalize(entry.personId);
+      if (!personId) return acc;
+      acc[personId] = acc[personId] || [];
+      acc[personId].push(entry);
+      return acc;
+    }, {});
+
+    const items = sortByName(people)
+      .map((person) => buildPeopleMapItem(person, followUpsByPerson[person.id] || [], visitsByPerson[person.id] || []));
+
+    const tags = Array.from(
+      new Set(
+        items
+          .flatMap((item) => item.tags || [])
+          .map((tag) => normalize(tag))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    const membershipTypes = Array.from(
+      new Set(
+        items
+          .map((item) => normalize(item.membershipType))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+
+    const churchLat = normalizeLatitude(churchSettings.mapLat);
+    const churchLng = normalizeLongitude(churchSettings.mapLng);
+
+    res.render('people-map', {
+      activeTab: 'people_map',
+      mapData: {
+        church: {
+          name: churchSettings.name,
+          lat: churchLat,
+          lng: churchLng
+        },
+        items,
+        filters: {
+          tags,
+          membershipTypes
+        },
+        initialSelectionId: normalize(req.query.personId)
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get('/people/new', async (req, res, next) => {
   try {
     const isDuplicateError = normalize(req.query.error) === 'duplicate';
@@ -2690,6 +2830,77 @@ app.get('/api/people/search', async (req, res, next) => {
       }));
 
     return res.json({ items });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/api/people-map/people/:id/location', async (req, res, next) => {
+  try {
+    const lat = normalizeLatitude(req.body.lat);
+    const lng = normalizeLongitude(req.body.lng);
+
+    if (!lat || !lng) {
+      return res.status(400).json({ error: 'Valid latitude and longitude are required.' });
+    }
+
+    let updated = null;
+    await updateData((data) => {
+      const person = (data.people || []).find((entry) => entry.id === req.params.id);
+      if (!person) return data;
+      person.mapLat = lat;
+      person.mapLng = lng;
+      person.updatedAt = new Date().toISOString();
+      updated = {
+        id: person.id,
+        lat: person.mapLat,
+        lng: person.mapLng
+      };
+      return data;
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Person not found.' });
+    }
+
+    return res.json({ ok: true, person: updated });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/api/people-map/people/:id/visit', async (req, res, next) => {
+  try {
+    const summary = normalize(req.body.summary);
+    const nextStep = normalize(req.body.nextStep);
+    const date = normalize(req.body.date) || new Date().toISOString().slice(0, 10);
+
+    if (!summary) {
+      return res.status(400).json({ error: 'Visit summary is required.' });
+    }
+
+    let visit = null;
+    await updateData((data) => {
+      const person = (data.people || []).find((entry) => entry.id === req.params.id);
+      if (!person) return data;
+      visit = {
+        id: id(),
+        personId: req.params.id,
+        date,
+        summary,
+        nextStep,
+        createdAt: new Date().toISOString()
+      };
+      data.visits = Array.isArray(data.visits) ? data.visits : [];
+      data.visits.push(visit);
+      return data;
+    });
+
+    if (!visit) {
+      return res.status(404).json({ error: 'Person not found.' });
+    }
+
+    return res.json({ ok: true, visit });
   } catch (err) {
     return next(err);
   }

@@ -1,0 +1,81 @@
+<%- include('partials-nav', { activeTab }) %>
+
+<script>
+  document.body.classList.add('page-people-map');
+</script>
+
+<div class="people-map-shell">
+  <div class="row g-3 people-map-layout">
+    <div class="col-12 col-xl-3" id="peopleMapSidebarCol">
+      <div class="card sticky-card people-map-sidebar">
+        <div class="card-header">
+          <h3 class="card-title mb-0">People Map</h3>
+        </div>
+        <div class="card-body d-grid gap-3">
+          <div>
+            <label class="form-label">Search People</label>
+            <input class="form-control" id="peopleMapSearchInput" placeholder="Name, tag, phone, address" />
+          </div>
+
+          <div>
+            <label class="form-label">Membership</label>
+            <div class="people-map-chip-row" id="peopleMapMembershipFilters"></div>
+          </div>
+
+          <div>
+            <label class="form-label">Lists / Tags</label>
+            <div class="people-map-chip-row" id="peopleMapTagFilters"></div>
+          </div>
+
+          <div class="people-map-actions">
+            <button type="button" class="btn btn-primary w-100" id="peopleMapPlacePinBtn" disabled>Place / Update Pin</button>
+            <button type="button" class="btn btn-outline-secondary w-100" id="peopleMapClearSelectionBtn">Clear Selection</button>
+          </div>
+
+          <div class="people-map-status" id="peopleMapStatus">
+            Select a person to focus their pin, move it, or log a visit from the map.
+          </div>
+
+          <div>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <strong>People</strong>
+              <span class="badge bg-azure-lt" id="peopleMapCountBadge">0 shown</span>
+            </div>
+            <div class="people-map-list" id="peopleMapList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-xl-9">
+      <div class="card people-map-card">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <h3 class="card-title mb-0">Field Map</h3>
+          <div class="d-flex align-items-center gap-2">
+            <input class="form-control form-control-sm people-map-location-search" id="peopleMapLocationSearch" placeholder="Search address or area" />
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="peopleMapSearchBtn">Search</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="people-map-canvas">
+            <div id="peopleMapCanvas"></div>
+            <div class="people-map-detail" id="peopleMapDetail">
+              <div class="people-map-detail-empty">
+                Click a pin or choose a person from the list to open their contact card.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  window.__PEOPLE_MAP_BOOTSTRAP__ = <%- JSON.stringify(mapData) %>;
+</script>
+<script src="/static/js/people-map.js?v=20260616a"></script>
+
+<%- include('partials-footer') %>
