@@ -392,6 +392,10 @@ function renderDetail() {
   const safeTags = item.tags.map((tag) => `<span class="badge bg-secondary-lt">${escapeHtml(tag)}</span>`).join(' ');
   const birthdayLabel = formatBirthday(item.birthday);
   const age = calculateAge(item.birthday);
+  const coordinateLine =
+    item.lat && item.lng
+      ? `<div><strong>Coordinates:</strong> ${escapeHtml(item.lat)}, ${escapeHtml(item.lng)}</div>`
+      : '<div><strong>Coordinates:</strong> not pinned yet</div>';
   const birthdayLine = birthdayLabel
     ? `<div><strong>Birthday:</strong> ${escapeHtml(birthdayLabel)}${age !== null ? ` · Age ${age}` : ''}</div>`
     : '<div><strong>Birthday:</strong> not saved yet</div>';
@@ -416,6 +420,7 @@ function renderDetail() {
       </div>
       <div class="people-map-detail-body">
         <div>${escapeHtml(item.address || 'No address saved yet.')}</div>
+        ${coordinateLine}
         <div>${escapeHtml(item.phone || 'No phone')}${item.email ? ` · ${escapeHtml(item.email)}` : ''}</div>
         ${birthdayLine}
         ${clubKidsLine}
@@ -428,6 +433,7 @@ function renderDetail() {
         <a class="btn btn-primary btn-sm" href="${item.profileUrl}">Open CRM Profile</a>
         <a class="btn btn-outline-secondary btn-sm ${item.whatsappUrl ? '' : 'disabled'}" href="${item.whatsappUrl || '#'}" target="_blank" rel="noreferrer">WhatsApp</a>
         <a class="btn btn-outline-secondary btn-sm ${directionsUrl ? '' : 'disabled'}" href="${directionsUrl || '#'}" target="_blank" rel="noreferrer">Open Route</a>
+        <button type="button" class="btn btn-outline-danger btn-sm" id="peopleMapRemovePinBtn" ${item.lat && item.lng ? '' : 'disabled'}>Remove Pin</button>
       </div>
       <form id="peopleMapVisitForm" class="people-map-visit-form">
         <div class="row g-2">
@@ -452,6 +458,28 @@ function renderDetail() {
   `;
 
   const form = document.getElementById('peopleMapVisitForm');
+  const removePinBtn = document.getElementById('peopleMapRemovePinBtn');
+  if (removePinBtn) {
+    removePinBtn.addEventListener('click', async () => {
+      const ok = window.confirm(`Remove the pin for "${item.name}"?`);
+      if (!ok) return;
+      try {
+        const response = await api(`/api/people-map/people/${item.id}/location`, {
+          method: 'DELETE'
+        });
+        item.lat = response.person?.lat || '';
+        item.lng = response.person?.lng || '';
+        state.placingMode = false;
+        renderPeopleList();
+        renderMarkers();
+        renderDetail();
+        updatePinModeControls();
+        statusText(`Pin removed for "${item.name}".`);
+      } catch (error) {
+        window.alert(error.message || 'Could not remove pin.');
+      }
+    });
+  }
   if (form) {
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -596,7 +624,7 @@ function initializeMap() {
       let nextAddress = '';
       if (resolvedAddress) {
         const shouldApplyAddress = window.confirm(
-          `Use this address for "${item.name}"?\n\n${resolvedAddress}`
+          `Use this address for "${item.name}"?\n\n${resolvedAddress}\n\nIf the house number is missing, you can click Cancel and keep the coordinates only.`
         );
         if (shouldApplyAddress) {
           nextAddress = resolvedAddress;

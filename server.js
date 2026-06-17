@@ -3537,6 +3537,34 @@ app.post('/api/people-map/people/:id/location', async (req, res, next) => {
   }
 });
 
+app.delete('/api/people-map/people/:id/location', async (req, res, next) => {
+  try {
+    let updated = null;
+    await updateData((data) => {
+      const person = (data.people || []).find((entry) => entry.id === req.params.id);
+      if (!person) return data;
+      person.mapLat = '';
+      person.mapLng = '';
+      person.updatedAt = new Date().toISOString();
+      updated = {
+        id: person.id,
+        lat: '',
+        lng: '',
+        address: normalize(person.address)
+      };
+      return data;
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Person not found.' });
+    }
+
+    return res.json({ ok: true, person: updated });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 app.post('/api/people-map/reverse-geocode', async (req, res, next) => {
   try {
     const lat = normalizeLatitude(req.body.lat);
