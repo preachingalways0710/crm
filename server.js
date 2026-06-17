@@ -2263,6 +2263,9 @@ function applyClubKidsCors(req, res) {
 }
 
 function isClubKidsWebhookAuthorized(req) {
+  if (isSessionAdmin(req)) {
+    return true;
+  }
   const expected = clubKidsWebhookSecret();
   const provided = normalize(req.get('x-clubkids-secret'));
   if (expected && provided && safePasswordCompare(provided, expected)) {
