@@ -93,7 +93,7 @@
     if (!button) return;
 
     const allowedClubKidsOrigin = 'https://clubkids.meuibbv.com';
-    const popupUrl = `${allowedClubKidsOrigin}/`;
+    const popupUrl = `${allowedClubKidsOrigin}/?crmImport=1`;
 
     async function importKids(kids) {
       const response = await fetch('/api/integrations/clubkids/bulk-sync', {
