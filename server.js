@@ -2528,6 +2528,10 @@ app.get('/settings/church', async (req, res, next) => {
   try {
     const data = await readData();
     const churchSettings = hydrateChurchSettings((data.settings || {}).church);
+    const visitationSettings = mergeVisitationWithChurchSettings(
+      hydrateVisitationSettings((data.settings || {}).visitation, data.people || []),
+      churchSettings
+    );
     const integrationSettings = hydrateIntegrationSettings((data.settings || {}).integrations);
     const saveStatus = normalize(req.query.saved) === '1' ? 'saved' : '';
     const geocodeStatus = normalize(req.query.geocode);
@@ -2946,6 +2950,10 @@ app.get('/people-map', async (req, res, next) => {
     const data = await readData();
     const clubKids = await readClubKidsKids().catch(() => []);
     const churchSettings = hydrateChurchSettings((data.settings || {}).church);
+    const visitationSettings = mergeVisitationWithChurchSettings(
+      hydrateVisitationSettings((data.settings || {}).visitation, data.people || []),
+      churchSettings
+    );
     const people = Array.isArray(data.people) ? data.people : [];
     const clubKidsByStrict = new Map();
     const clubKidsByCompact = new Map();
@@ -3001,14 +3009,14 @@ app.get('/people-map', async (req, res, next) => {
       )
     ).sort((a, b) => a.localeCompare(b));
 
-    const churchLat = normalizeLatitude(churchSettings.mapLat);
-    const churchLng = normalizeLongitude(churchSettings.mapLng);
+    const churchLat = normalizeLatitude(visitationSettings.churchProfile.lat || churchSettings.mapLat);
+    const churchLng = normalizeLongitude(visitationSettings.churchProfile.lng || churchSettings.mapLng);
 
     res.render('people-map', {
       activeTab: 'people_map',
       mapData: {
         church: {
-          name: churchSettings.name,
+          name: visitationSettings.churchProfile.name || churchSettings.name,
           lat: churchLat,
           lng: churchLng
         },
