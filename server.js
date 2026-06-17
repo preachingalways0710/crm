@@ -194,6 +194,124 @@ function normalizeNameKey(value) {
     .trim();
 }
 
+const CLUB_KIDS_NAME_STOPWORDS = new Set(['da', 'de', 'do', 'das', 'dos', 'e']);
+
+function normalizeNameTokens(value, compact = false) {
+  const tokens = normalizeNameKey(value)
+    .split(' ')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return compact ? tokens.filter((token) => !CLUB_KIDS_NAME_STOPWORDS.has(token)) : tokens;
+}
+
+function compactNameKey(value) {
+  return normalizeNameTokens(value, true).join(' ');
+}
+
+function containsNameKey(longer, shorter) {
+  const longerValue = normalize(longer);
+  const shorterValue = normalize(shorter);
+  if (!longerValue || !shorterValue || longerValue === shorterValue) return false;
+  const longerTokens = longerValue.split(' ').filter(Boolean);
+  const shorterTokens = shorterValue.split(' ').filter(Boolean);
+  if (shorterTokens.length < 2 || shorterTokens.length >= longerTokens.length) return false;
+  return longerValue.includes(shorterValue);
+}
+
+function matchClubKidsPerson(person, clubKids = [], indexes = {}) {
+  const strictKey = normalizeNameKey(person.name);
+  const compactKey = compactNameKey(person.name);
+  const strictMatches = indexes.byStrict?.get(strictKey) || [];
+  if (strictMatches.length === 1) {
+    return { kid: strictMatches[0], strategy: 'strict' };
+  }
+
+  const compactMatches = indexes.byCompact?.get(compactKey) || [];
+  if (compactMatches.length === 1) {
+    return { kid: compactMatches[0], strategy: 'compact' };
+  }
+
+  const birthday = normalize(person.birthday);
+  const birthdayMatches = clubKids.filter((kid) => {
+    if (birthday && normalize(kid.birthday) && normalize(kid.birthday) !== birthday) return false;
+    const kidStrict = normalize(kid.nameKey);
+    const kidCompact = compactNameKey(kid.name);
+    return containsNameKey(strictKey, kidStrict) || containsNameKey(kidStrict, strictKey) || containsNameKey(compactKey, kidCompact) || containsNameKey(kidCompact, compactKey);
+  });
+
+  if (birthdayMatches.length === 1) {
+    return { kid: birthdayMatches[0], strategy: 'contains+birthday' };
+  }
+
+  const containsMatches = clubKids.filter((kid) => {
+    const kidCompact = compactNameKey(kid.name);
+    return containsNameKey(compactKey, kidCompact) || containsNameKey(kidCompact, compactKey);
+  });
+
+  if (containsMatches.length === 1) {
+    return { kid: containsMatches[0], strategy: 'contains' };
+  }
+
+  return { kid: null, strategy: '' };
+}
+
+async function syncClubKidsPeopleData() {
+  if (!useClubKidsDatabase()) {
+    return { matchedPeople: 0, taggedPeople: 0, enrichedPeople: 0, totalKids: 0 };
+  }
+
+  const clubKids = await readClubKidsKids().catch(() => []);
+  if (!clubKids.length) {
+    return { matchedPeople: 0, taggedPeople: 0, enrichedPeople: 0, totalKids: 0 };
+  }
+
+  const byStrict = new Map();
+  const byCompact = new Map();
+  clubKids.forEach((kid) => {
+    const strict = normalize(kid.nameKey);
+    const compact = compactNameKey(kid.name);
+    if (strict) byStrict.set(strict, [...(byStrict.get(strict) || []), kid]);
+    if (compact) byCompact.set(compact, [...(byCompact.get(compact) || []), kid]);
+  });
+
+  let matchedPeople = 0;
+  let taggedPeople = 0;
+  let enrichedPeople = 0;
+
+  await updateData((state) => {
+    const people = Array.isArray(state.people) ? state.people : [];
+    people.forEach((person) => {
+      const match = matchClubKidsPerson(person, clubKids, { byStrict, byCompact });
+      if (!match.kid) return;
+      matchedPeople += 1;
+
+      const nextTags = normalizePersonTags(person.tags);
+      const beforeTags = nextTags.length;
+      person.tags = normalizePersonTags([...nextTags, 'clubkids']);
+      if (person.tags.length > beforeTags) {
+        taggedPeople += 1;
+      }
+
+      let changed = false;
+      if (!normalize(person.photoUrl) && normalize(match.kid.photoUrl)) {
+        person.photoUrl = normalize(match.kid.photoUrl);
+        changed = true;
+      }
+      if (!normalize(person.birthday) && normalize(match.kid.birthday)) {
+        person.birthday = normalize(match.kid.birthday);
+        changed = true;
+      }
+      if (changed) {
+        enrichedPeople += 1;
+      }
+    });
+
+    return state;
+  });
+
+  return { matchedPeople, taggedPeople, enrichedPeople, totalKids: clubKids.length };
+}
+
 function useClubKidsDatabase() {
   return Boolean(
     process.env.CLUBKIDS_DB_HOST &&
@@ -2603,16 +2721,24 @@ app.get('/people-map', async (req, res, next) => {
       syncAllAutoFollowUps(state);
       return state;
     });
+    const syncSummary = await syncClubKidsPeopleData().catch(() => ({
+      matchedPeople: 0,
+      taggedPeople: 0,
+      enrichedPeople: 0,
+      totalKids: 0
+    }));
     const data = await readData();
     const clubKids = await readClubKidsKids().catch(() => []);
     const churchSettings = hydrateChurchSettings((data.settings || {}).church);
     const people = Array.isArray(data.people) ? data.people : [];
-    const clubKidsByName = clubKids.reduce((acc, item) => {
-      if (!item.nameKey) return acc;
-      acc[item.nameKey] = acc[item.nameKey] || [];
-      acc[item.nameKey].push(item);
-      return acc;
-    }, {});
+    const clubKidsByStrict = new Map();
+    const clubKidsByCompact = new Map();
+    clubKids.forEach((item) => {
+      const strict = normalize(item.nameKey);
+      const compact = compactNameKey(item.name);
+      if (strict) clubKidsByStrict.set(strict, [...(clubKidsByStrict.get(strict) || []), item]);
+      if (compact) clubKidsByCompact.set(compact, [...(clubKidsByCompact.get(compact) || []), item]);
+    });
     const followUpsByPerson = (data.followUps || []).reduce((acc, entry) => {
       const personId = normalize(entry.personId);
       if (!personId) return acc;
@@ -2630,8 +2756,10 @@ app.get('/people-map', async (req, res, next) => {
 
     const items = sortByName(people)
       .map((person) => {
-        const matches = clubKidsByName[normalizeNameKey(person.name)] || [];
-        const clubKidsMatch = matches.length === 1 ? matches[0] : null;
+        const clubKidsMatch = matchClubKidsPerson(person, clubKids, {
+          byStrict: clubKidsByStrict,
+          byCompact: clubKidsByCompact
+        }).kid;
         return buildPeopleMapItem(
           person,
           followUpsByPerson[person.id] || [],
@@ -2676,7 +2804,10 @@ app.get('/people-map', async (req, res, next) => {
         initialSelectionId: normalize(req.query.personId),
         clubKids: {
           connected: useClubKidsDatabase(),
-          totalKids: clubKids.length
+          totalKids: clubKids.length,
+          matchedPeople: syncSummary.matchedPeople,
+          taggedPeople: syncSummary.taggedPeople,
+          enrichedPeople: syncSummary.enrichedPeople
         }
       }
     });
