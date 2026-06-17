@@ -219,6 +219,14 @@ function containsNameKey(longer, shorter) {
 }
 
 function matchClubKidsPerson(person, clubKids = [], indexes = {}) {
+  const clubKidsId = normalize(person.clubKidsId);
+  if (clubKidsId) {
+    const byIdMatch = (indexes.byId?.get(clubKidsId) || [])[0];
+    if (byIdMatch) {
+      return { kid: byIdMatch, strategy: 'clubkids-id' };
+    }
+  }
+
   const strictKey = normalizeNameKey(person.name);
   const compactKey = compactNameKey(person.name);
   const strictMatches = indexes.byStrict?.get(strictKey) || [];
@@ -255,21 +263,61 @@ function matchClubKidsPerson(person, clubKids = [], indexes = {}) {
   return { kid: null, strategy: '' };
 }
 
+function buildClubKidsImportedPerson(kid) {
+  const nowIso = new Date().toISOString();
+  return hydratePersonRelationships({
+    id: id(),
+    clubKidsId: normalize(kid.id),
+    name: normalize(kid.name) || 'Unnamed',
+    phone: '',
+    email: '',
+    birthday: normalize(kid.birthday),
+    sectionId: '',
+    notes: 'Imported from ClubKids.',
+    gender: '',
+    ageGroup: 'Criança',
+    membershipType: 'Frequentador',
+    occupation: '',
+    language: '',
+    maritalStatus: '',
+    allergies: '',
+    emergencyContact: '',
+    medicalNotes: '',
+    photoUrl: normalize(kid.photoUrl),
+    address: '',
+    city: '',
+    state: '',
+    zipCode: '',
+    mapLat: '',
+    mapLng: '',
+    tags: normalizePersonTags(['clubkids']),
+    followUpCadenceMonths: normalizeFollowUpCadenceMonths('', 'Frequentador'),
+    spouseIds: [],
+    parentIds: [],
+    childIds: [],
+    createdAt: nowIso,
+    updatedAt: nowIso
+  });
+}
+
 async function syncClubKidsPeopleData() {
   if (!useClubKidsDatabase()) {
-    return { matchedPeople: 0, taggedPeople: 0, enrichedPeople: 0, totalKids: 0 };
+    return { matchedPeople: 0, taggedPeople: 0, enrichedPeople: 0, createdPeople: 0, totalKids: 0 };
   }
 
   const clubKids = await readClubKidsKids().catch(() => []);
   if (!clubKids.length) {
-    return { matchedPeople: 0, taggedPeople: 0, enrichedPeople: 0, totalKids: 0 };
+    return { matchedPeople: 0, taggedPeople: 0, enrichedPeople: 0, createdPeople: 0, totalKids: 0 };
   }
 
+  const byId = new Map();
   const byStrict = new Map();
   const byCompact = new Map();
   clubKids.forEach((kid) => {
+    const sourceId = normalize(kid.id);
     const strict = normalize(kid.nameKey);
     const compact = compactNameKey(kid.name);
+    if (sourceId) byId.set(sourceId, [...(byId.get(sourceId) || []), kid]);
     if (strict) byStrict.set(strict, [...(byStrict.get(strict) || []), kid]);
     if (compact) byCompact.set(compact, [...(byCompact.get(compact) || []), kid]);
   });
@@ -277,13 +325,17 @@ async function syncClubKidsPeopleData() {
   let matchedPeople = 0;
   let taggedPeople = 0;
   let enrichedPeople = 0;
+  let createdPeople = 0;
 
   await updateData((state) => {
     const people = Array.isArray(state.people) ? state.people : [];
+    const matchedKidIds = new Set();
+
     people.forEach((person) => {
-      const match = matchClubKidsPerson(person, clubKids, { byStrict, byCompact });
+      const match = matchClubKidsPerson(person, clubKids, { byId, byStrict, byCompact });
       if (!match.kid) return;
       matchedPeople += 1;
+      matchedKidIds.add(normalize(match.kid.id));
 
       const nextTags = normalizePersonTags(person.tags);
       const beforeTags = nextTags.length;
@@ -293,6 +345,10 @@ async function syncClubKidsPeopleData() {
       }
 
       let changed = false;
+      if (normalize(person.clubKidsId) !== normalize(match.kid.id)) {
+        person.clubKidsId = normalize(match.kid.id);
+        changed = true;
+      }
       if (!normalize(person.photoUrl) && normalize(match.kid.photoUrl)) {
         person.photoUrl = normalize(match.kid.photoUrl);
         changed = true;
@@ -302,14 +358,30 @@ async function syncClubKidsPeopleData() {
         changed = true;
       }
       if (changed) {
+        person.updatedAt = new Date().toISOString();
         enrichedPeople += 1;
       }
+    });
+
+    clubKids.forEach((kid) => {
+      const kidId = normalize(kid.id);
+      if (!kidId || matchedKidIds.has(kidId)) return;
+      const person = buildClubKidsImportedPerson(kid);
+      people.push(person);
+      matchedKidIds.add(kidId);
+      matchedPeople += 1;
+      createdPeople += 1;
+      taggedPeople += 1;
+      if (normalize(person.photoUrl) || normalize(person.birthday)) {
+        enrichedPeople += 1;
+      }
+      syncFollowUpsForPerson(state, person);
     });
 
     return state;
   });
 
-  return { matchedPeople, taggedPeople, enrichedPeople, totalKids: clubKids.length };
+  return { matchedPeople, taggedPeople, enrichedPeople, createdPeople, totalKids: clubKids.length };
 }
 
 function useClubKidsDatabase() {
@@ -2725,6 +2797,7 @@ app.get('/people-map', async (req, res, next) => {
       matchedPeople: 0,
       taggedPeople: 0,
       enrichedPeople: 0,
+      createdPeople: 0,
       totalKids: 0
     }));
     const data = await readData();
@@ -2807,7 +2880,8 @@ app.get('/people-map', async (req, res, next) => {
           totalKids: clubKids.length,
           matchedPeople: syncSummary.matchedPeople,
           taggedPeople: syncSummary.taggedPeople,
-          enrichedPeople: syncSummary.enrichedPeople
+          enrichedPeople: syncSummary.enrichedPeople,
+          createdPeople: syncSummary.createdPeople
         }
       }
     });

@@ -515,7 +515,7 @@ function init() {
   const clubKidsSummary = document.getElementById('peopleMapClubKidsSummary');
   if (clubKidsSummary) {
     clubKidsSummary.textContent = boot.clubKids?.connected
-      ? `${Number(boot.clubKids.matchedPeople) || 0} matched · ${Number(boot.clubKids.totalKids) || 0} ClubKids records`
+      ? `${Number(boot.clubKids.createdPeople) || 0} imported · ${Number(boot.clubKids.matchedPeople) || 0} linked · ${Number(boot.clubKids.totalKids) || 0} ClubKids records`
       : 'ClubKids sync is off';
   }
   initializeMap();
