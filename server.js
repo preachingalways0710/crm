@@ -2234,6 +2234,37 @@ function clubKidsWebhookSecret() {
   return normalize(process.env.CLUBKIDS_SYNC_SECRET || process.env.CRM_CLUBKIDS_SYNC_SECRET);
 }
 
+function getClubKidsExportUrl() {
+  const base = normalize(
+    process.env.CLUBKIDS_EXPORT_URL ||
+      process.env.CLUBKIDS_APP_URL ||
+      process.env.CLUBKIDS_BASE_URL ||
+      'https://clubkids.meuibbv.com'
+  );
+  const normalizedBase = normalizeUrlWithScheme(base).replace(/\/+$/, '');
+  return `${normalizedBase}/api/crm-export`;
+}
+
+async function fetchClubKidsExportRows() {
+  const secret = clubKidsWebhookSecret();
+  if (!secret) {
+    throw new Error('ClubKids sync secret is missing on CRM.');
+  }
+
+  const response = await fetchWithTimeout(getClubKidsExportUrl(), {
+    headers: {
+      Accept: 'application/json',
+      'x-clubkids-secret': secret
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(normalize(payload?.error) || `ClubKids export failed (${response.status}).`);
+  }
+
+  return Array.isArray(payload?.kids) ? payload.kids : [];
+}
+
 function getTrustedClubKidsOrigins() {
   return [
     process.env.CLUBKIDS_APP_URL,
@@ -3107,6 +3138,47 @@ app.post('/api/integrations/clubkids/bulk-sync', async (req, res, next) => {
       created,
       updated
     });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/import/clubkids', requireAdmin, async (req, res, next) => {
+  try {
+    const rows = await fetchClubKidsExportRows();
+    const kids = rows
+      .map((entry) => ({
+        id: normalize(entry?.id),
+        name: normalize(entry?.name),
+        birthday: normalize(entry?.birthday),
+        photoUrl: normalizeSourcePhotoUrl(
+          entry?.photo_url || entry?.photoUrl,
+          process.env.CLUBKIDS_BASE_URL || 'https://clubkids.meuibbv.com'
+        ),
+        points: 0,
+        nameKey: normalizeNameKey(entry?.name)
+      }))
+      .filter((entry) => entry.id && entry.name);
+
+    let created = 0;
+    let updated = 0;
+
+    await updateData((state) => {
+      kids.forEach((kid) => {
+        const result = upsertClubKidsKidPerson(state, kid);
+        if (result.created) created += 1;
+        if (result.updated) updated += 1;
+      });
+      return state;
+    });
+
+    const params = new URLSearchParams({
+      imported: String(created),
+      skipped: '0',
+      message: `ClubKids import complete. Received ${kids.length}, created ${created}, updated ${updated}.`
+    });
+
+    return res.redirect(`/import?${params.toString()}`);
   } catch (err) {
     return next(err);
   }
