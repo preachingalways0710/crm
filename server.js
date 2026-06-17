@@ -300,6 +300,73 @@ function buildClubKidsImportedPerson(kid) {
   });
 }
 
+function upsertClubKidsKidPerson(state, kid) {
+  if (!kid || !normalize(kid.id)) {
+    return { person: null, created: false, updated: false };
+  }
+
+  const people = Array.isArray(state.people) ? state.people : [];
+  const byId = people.find((person) => normalize(person.clubKidsId) === normalize(kid.id));
+  const fallbackMatch = byId || people.find((person) => matchClubKidsPerson(person, [kid]).kid);
+  const nowIso = new Date().toISOString();
+
+  if (!fallbackMatch) {
+    const person = buildClubKidsImportedPerson(kid);
+    people.push(person);
+    syncFollowUpsForPerson(state, person);
+    return { person, created: true, updated: false };
+  }
+
+  let changed = false;
+  if (normalize(fallbackMatch.clubKidsId) !== normalize(kid.id)) {
+    fallbackMatch.clubKidsId = normalize(kid.id);
+    changed = true;
+  }
+
+  if (normalize(fallbackMatch.name) !== normalize(kid.name) && normalize(kid.name)) {
+    fallbackMatch.name = normalize(kid.name);
+    changed = true;
+  }
+
+  const nextTags = normalizePersonTags([...(fallbackMatch.tags || []), 'clubkids']);
+  if (nextTags.join('|') !== normalizePersonTags(fallbackMatch.tags).join('|')) {
+    fallbackMatch.tags = nextTags;
+    changed = true;
+  }
+
+  if (normalize(kid.photoUrl) && normalize(fallbackMatch.photoUrl) !== normalize(kid.photoUrl)) {
+    fallbackMatch.photoUrl = normalize(kid.photoUrl);
+    changed = true;
+  }
+
+  if (normalize(kid.birthday) && normalize(fallbackMatch.birthday) !== normalize(kid.birthday)) {
+    fallbackMatch.birthday = normalize(kid.birthday);
+    changed = true;
+  }
+
+  if (!normalize(fallbackMatch.notes).includes('Imported from ClubKids')) {
+    fallbackMatch.notes = normalize([fallbackMatch.notes, 'Imported from ClubKids.'].filter(Boolean).join('\n'));
+    changed = true;
+  }
+
+  if (changed) {
+    fallbackMatch.updatedAt = nowIso;
+    syncFollowUpsForPerson(state, fallbackMatch);
+  }
+
+  return { person: fallbackMatch, created: false, updated: changed };
+}
+
+function archiveClubKidsKidPerson(state, clubKidsId) {
+  const people = Array.isArray(state.people) ? state.people : [];
+  const person = people.find((entry) => normalize(entry.clubKidsId) === normalize(clubKidsId));
+  if (!person) return { person: null, archived: false };
+  if (normalize(person.archivedAt)) return { person, archived: false };
+  person.archivedAt = new Date().toISOString();
+  person.updatedAt = person.archivedAt;
+  return { person, archived: true };
+}
+
 async function syncClubKidsPeopleData() {
   if (!useClubKidsDatabase()) {
     return { matchedPeople: 0, taggedPeople: 0, enrichedPeople: 0, createdPeople: 0, totalKids: 0 };
@@ -2162,6 +2229,17 @@ function safePasswordCompare(input, expected) {
   return crypto.timingSafeEqual(a, b);
 }
 
+function clubKidsWebhookSecret() {
+  return normalize(process.env.CLUBKIDS_SYNC_SECRET || process.env.CRM_CLUBKIDS_SYNC_SECRET);
+}
+
+function isClubKidsWebhookAuthorized(req) {
+  const expected = clubKidsWebhookSecret();
+  if (!expected) return false;
+  const provided = normalize(req.get('x-clubkids-secret'));
+  return safePasswordCompare(provided, expected);
+}
+
 function isPublicPath(pathname) {
   return (
     pathname === '/login' ||
@@ -2887,6 +2965,63 @@ app.get('/people-map', async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+app.post('/api/integrations/clubkids/webhook', async (req, res, next) => {
+  try {
+    if (!isClubKidsWebhookAuthorized(req)) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    }
+
+    const action = normalize(req.body?.action).toLowerCase();
+    const kid = req.body?.kid && typeof req.body.kid === 'object'
+      ? {
+          id: normalize(req.body.kid.id),
+          name: normalize(req.body.kid.name),
+          birthday: normalize(req.body.kid.birthday),
+          photoUrl: normalizeSourcePhotoUrl(req.body.kid.photo_url || req.body.kid.photoUrl, process.env.CLUBKIDS_BASE_URL || 'https://clubkids.meuibbv.com'),
+          points: 0,
+          nameKey: normalizeNameKey(req.body.kid.name)
+        }
+      : null;
+    const clubKidsId = normalize(req.body?.clubKidsId || kid?.id);
+
+    if (!action) {
+      return res.status(400).json({ ok: false, error: 'Missing action.' });
+    }
+
+    let result = { created: false, updated: false, archived: false, personId: '' };
+
+    await updateData((state) => {
+      if (action === 'deleted') {
+        const archived = archiveClubKidsKidPerson(state, clubKidsId);
+        result = {
+          created: false,
+          updated: false,
+          archived: archived.archived,
+          personId: normalize(archived.person?.id)
+        };
+        return state;
+      }
+
+      if (!kid || !kid.id || !kid.name) {
+        return state;
+      }
+
+      const upsert = upsertClubKidsKidPerson(state, kid);
+      result = {
+        created: upsert.created,
+        updated: upsert.updated,
+        archived: false,
+        personId: normalize(upsert.person?.id)
+      };
+      return state;
+    });
+
+    return res.json({ ok: true, action, ...result });
+  } catch (err) {
+    return next(err);
   }
 });
 
