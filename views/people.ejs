@@ -10,7 +10,6 @@
             <%= totalFilteredPeople ? `Showing ${pageRangeStart}-${pageRangeEnd} of ${totalFilteredPeople} people` : '0 people' %>
           </span>
           <span class="badge bg-azure-lt" id="selectedPeopleCountBadge">Selected: 0</span>
-          <button class="btn btn-outline-secondary btn-sm" type="button" id="clubKidsImportBtn">Import/Refresh ClubKids Contacts</button>
           <a class="btn btn-primary btn-sm" href="/people/new">+ Person</a>
         </div>
       </div>
@@ -406,77 +405,3 @@
 </script>
 
 <%- include('partials-footer') %>
-
-<script>
-  (function () {
-    const button = document.getElementById('clubKidsImportBtn');
-    if (!button) return;
-
-    const allowedClubKidsOrigin = 'https://clubkids.meuibbv.com';
-    const popupUrl = `${allowedClubKidsOrigin}/`;
-
-    async function importKids(kids) {
-      const response = await fetch('/api/integrations/clubkids/bulk-sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kids })
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload?.error || 'Could not import ClubKids contacts.');
-      }
-      return payload;
-    }
-
-    button.addEventListener('click', () => {
-      const popup = window.open(popupUrl, 'clubkids-crm-import', 'width=1200,height=850');
-      if (!popup) {
-        window.alert('Please allow popups for ClubKids import.');
-        return;
-      }
-
-      const originalLabel = button.textContent;
-      button.disabled = true;
-      button.textContent = 'Importing...';
-
-      const cleanup = () => {
-        button.disabled = false;
-        button.textContent = originalLabel;
-        window.removeEventListener('message', onMessage);
-        clearInterval(pingTimer);
-        clearTimeout(timeoutTimer);
-      };
-
-      const onMessage = async (event) => {
-        if (event.origin !== allowedClubKidsOrigin) return;
-        if (event.data?.type !== 'crm-clubkids-export-response') return;
-
-        try {
-          const result = await importKids(Array.isArray(event.data.kids) ? event.data.kids : []);
-          cleanup();
-          try { popup.close(); } catch {}
-          window.alert(`ClubKids import complete. Received ${result.received || 0}, created ${result.created || 0}, updated ${result.updated || 0}.`);
-          window.location.reload();
-        } catch (error) {
-          cleanup();
-          window.alert(error.message || 'ClubKids import failed.');
-        }
-      };
-
-      window.addEventListener('message', onMessage);
-
-      const pingTimer = setInterval(() => {
-        if (popup.closed) {
-          cleanup();
-          return;
-        }
-        popup.postMessage({ type: 'crm-clubkids-export-request' }, allowedClubKidsOrigin);
-      }, 700);
-
-      const timeoutTimer = setTimeout(() => {
-        cleanup();
-        window.alert('ClubKids import timed out. Keep ClubKids open and try again.');
-      }, 30000);
-    });
-  })();
-</script>

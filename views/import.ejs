@@ -45,6 +45,23 @@
 
   <div class="col-12 col-lg-4">
     <div class="card mb-3">
+      <div class="card-header"><h3 class="card-title">ClubKids Import</h3></div>
+      <div class="card-body">
+        <p class="text-secondary">
+          Use this to import or refresh children from ClubKids into the CRM. After clicking the button,
+          ClubKids will open in a popup. If ClubKids asks you to log in, just log in there and leave the popup open.
+          The CRM will continue automatically and close the popup when the import finishes.
+        </p>
+        <div class="d-grid gap-2">
+          <button class="btn btn-outline-secondary" type="button" id="clubKidsImportBtn">Import/Refresh ClubKids Contacts</button>
+          <div class="small text-secondary" id="clubKidsImportStatus">
+            One-time full refresh here. New ClubKids updates should still flow over automatically.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-3">
       <div class="card-header"><h3 class="card-title">Current Data</h3></div>
       <div class="card-body">
         <div class="h1 m-0"><%= totalPeople %></div>
@@ -68,3 +85,93 @@
 </div>
 
 <%- include('partials-footer') %>
+
+<script>
+  (function () {
+    const button = document.getElementById('clubKidsImportBtn');
+    const status = document.getElementById('clubKidsImportStatus');
+    if (!button) return;
+
+    const allowedClubKidsOrigin = 'https://clubkids.meuibbv.com';
+    const popupUrl = `${allowedClubKidsOrigin}/`;
+
+    async function importKids(kids) {
+      const response = await fetch('/api/integrations/clubkids/bulk-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kids })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Could not import ClubKids contacts.');
+      }
+      return payload;
+    }
+
+    button.addEventListener('click', () => {
+      const popup = window.open(popupUrl, 'clubkids-crm-import', 'width=1200,height=850');
+      if (!popup) {
+        window.alert('Please allow popups for ClubKids import.');
+        return;
+      }
+
+      const originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Importing...';
+      if (status) {
+        status.textContent = 'Waiting for ClubKids. If login is required, log in there and leave the popup open.';
+      }
+
+      const cleanup = () => {
+        button.disabled = false;
+        button.textContent = originalLabel;
+        window.removeEventListener('message', onMessage);
+        clearInterval(pingTimer);
+        clearTimeout(timeoutTimer);
+      };
+
+      const onMessage = async (event) => {
+        if (event.origin !== allowedClubKidsOrigin) return;
+        if (event.data?.type !== 'crm-clubkids-export-response') return;
+
+        try {
+          const result = await importKids(Array.isArray(event.data.kids) ? event.data.kids : []);
+          cleanup();
+          try { popup.close(); } catch {}
+          if (status) {
+            status.textContent = `ClubKids import complete. Received ${result.received || 0}, created ${result.created || 0}, updated ${result.updated || 0}.`;
+          }
+          window.alert(`ClubKids import complete. Received ${result.received || 0}, created ${result.created || 0}, updated ${result.updated || 0}.`);
+          window.location.reload();
+        } catch (error) {
+          cleanup();
+          if (status) {
+            status.textContent = error.message || 'ClubKids import failed.';
+          }
+          window.alert(error.message || 'ClubKids import failed.');
+        }
+      };
+
+      window.addEventListener('message', onMessage);
+
+      const pingTimer = setInterval(() => {
+        if (popup.closed) {
+          cleanup();
+          if (status) {
+            status.textContent = 'Popup closed before ClubKids sent the roster. Try again.';
+          }
+          return;
+        }
+        popup.postMessage({ type: 'crm-clubkids-export-request' }, allowedClubKidsOrigin);
+      }, 700);
+
+      const timeoutTimer = setTimeout(() => {
+        cleanup();
+        if (status) {
+          status.textContent = 'ClubKids import timed out. Keep ClubKids open after login and try again.';
+        }
+        window.alert('ClubKids import timed out. Keep ClubKids open after login and try again.');
+      }, 30000);
+    });
+  })();
+</script>
