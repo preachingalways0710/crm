@@ -1095,6 +1095,7 @@ function normalizeTempContactStatus(value) {
 function normalizeUrlWithScheme(value) {
   const raw = normalize(value);
   if (!raw) return '';
+  if (/^data:/i.test(raw)) return raw;
   if (/^https?:\/\//i.test(raw)) return raw;
   return `https://${raw}`;
 }
@@ -2233,11 +2234,41 @@ function clubKidsWebhookSecret() {
   return normalize(process.env.CLUBKIDS_SYNC_SECRET || process.env.CRM_CLUBKIDS_SYNC_SECRET);
 }
 
+function getTrustedClubKidsOrigins() {
+  return [
+    process.env.CLUBKIDS_APP_URL,
+    process.env.CLUBKIDS_ALLOWED_ORIGIN,
+    'https://clubkids.meuibbv.com',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ]
+    .map((value) => normalize(value))
+    .filter(Boolean);
+}
+
+function isTrustedClubKidsOrigin(origin) {
+  const normalizedOrigin = normalize(origin);
+  if (!normalizedOrigin) return false;
+  return getTrustedClubKidsOrigins().includes(normalizedOrigin);
+}
+
+function applyClubKidsCors(req, res) {
+  const origin = normalize(req.get('origin'));
+  if (!isTrustedClubKidsOrigin(origin)) return false;
+  res.set('Access-Control-Allow-Origin', origin);
+  res.set('Vary', 'Origin');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, X-ClubKids-Secret');
+  return true;
+}
+
 function isClubKidsWebhookAuthorized(req) {
   const expected = clubKidsWebhookSecret();
-  if (!expected) return false;
   const provided = normalize(req.get('x-clubkids-secret'));
-  return safePasswordCompare(provided, expected);
+  if (expected && provided && safePasswordCompare(provided, expected)) {
+    return true;
+  }
+  return isTrustedClubKidsOrigin(req.get('origin'));
 }
 
 function isPublicPath(pathname) {
@@ -2968,8 +2999,14 @@ app.get('/people-map', async (req, res, next) => {
   }
 });
 
+app.options('/api/integrations/clubkids/webhook', (req, res) => {
+  applyClubKidsCors(req, res);
+  return res.status(204).end();
+});
+
 app.post('/api/integrations/clubkids/webhook', async (req, res, next) => {
   try {
+    applyClubKidsCors(req, res);
     if (!isClubKidsWebhookAuthorized(req)) {
       return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }
