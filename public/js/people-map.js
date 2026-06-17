@@ -1,6 +1,9 @@
 let map;
 let markerLayer;
 let searchMarker;
+let baseLayer;
+let mapLabelLayer;
+let churchMarker;
 
 const boot = window.__PEOPLE_MAP_BOOTSTRAP__ || {
   church: { name: '', lat: '', lng: '' },
@@ -17,7 +20,9 @@ const state = {
   membershipFilter: '',
   tagFilter: '',
   placingMode: false,
-  markersById: new Map()
+  markersById: new Map(),
+  mapStyle: 'satellite',
+  bearing: -28
 };
 
 function safeText(value) {
@@ -159,6 +164,78 @@ function statusText(message) {
   if (el) {
     el.textContent = message;
   }
+}
+
+function createBaseLayer(mode) {
+  if (mode === 'standard') {
+    return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    });
+  }
+
+  return L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri'
+    }
+  );
+}
+
+function createLabelLayer() {
+  return L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+    maxZoom: 20,
+    subdomains: 'abcd',
+    opacity: 0.9,
+    attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+  });
+}
+
+function updateMapStyleControls() {
+  const standardBtn = document.getElementById('peopleMapStandardBtn');
+  const satelliteBtn = document.getElementById('peopleMapSatelliteBtn');
+  if (standardBtn) {
+    standardBtn.classList.toggle('active', state.mapStyle === 'standard');
+  }
+  if (satelliteBtn) {
+    satelliteBtn.classList.toggle('active', state.mapStyle === 'satellite');
+  }
+}
+
+function applyMapStyle(mode) {
+  if (!map) return;
+  state.mapStyle = mode === 'standard' ? 'standard' : 'satellite';
+
+  if (baseLayer && map.hasLayer(baseLayer)) {
+    map.removeLayer(baseLayer);
+  }
+  if (mapLabelLayer && map.hasLayer(mapLabelLayer)) {
+    map.removeLayer(mapLabelLayer);
+  }
+
+  baseLayer = createBaseLayer(state.mapStyle);
+  baseLayer.addTo(map);
+
+  if (state.mapStyle === 'satellite') {
+    mapLabelLayer = createLabelLayer();
+    mapLabelLayer.addTo(map);
+  } else {
+    mapLabelLayer = null;
+  }
+
+  updateMapStyleControls();
+}
+
+function setMapBearing(value) {
+  state.bearing = Number.isFinite(value) ? value : 0;
+  if (map && typeof map.setBearing === 'function') {
+    map.setBearing(state.bearing);
+  }
+}
+
+function rotateMapBy(deltaDegrees) {
+  setMapBearing((state.bearing || 0) + deltaDegrees);
 }
 
 function renderChipGroup(rootId, items, activeValue, onPick) {
@@ -392,16 +469,19 @@ function initializeMap() {
   const initialLat = churchLat ?? parseCoordinate(firstMapped?.lat, -90, 90) ?? -8.7619;
   const initialLng = churchLng ?? parseCoordinate(firstMapped?.lng, -180, 180) ?? -63.9039;
 
-  map = L.map('peopleMapCanvas').setView([initialLat, initialLng], 14);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
+  map = L.map('peopleMapCanvas', {
+    rotate: true,
+    touchRotate: true,
+    rotateControl: false,
+    bearing: state.bearing
+  }).setView([initialLat, initialLng], 15);
+
+  applyMapStyle(state.mapStyle);
 
   markerLayer = L.layerGroup().addTo(map);
 
   if (churchLat !== null && churchLng !== null) {
-    L.circleMarker([churchLat, churchLng], {
+    churchMarker = L.circleMarker([churchLat, churchLng], {
       radius: 7,
       color: '#0f172a',
       fillColor: '#10b981',
@@ -465,6 +545,26 @@ async function searchLocation() {
 }
 
 function wireUi() {
+  document.getElementById('peopleMapStandardBtn')?.addEventListener('click', () => {
+    applyMapStyle('standard');
+  });
+
+  document.getElementById('peopleMapSatelliteBtn')?.addEventListener('click', () => {
+    applyMapStyle('satellite');
+  });
+
+  document.getElementById('peopleMapRotateLeftBtn')?.addEventListener('click', () => {
+    rotateMapBy(-15);
+  });
+
+  document.getElementById('peopleMapRotateResetBtn')?.addEventListener('click', () => {
+    setMapBearing(0);
+  });
+
+  document.getElementById('peopleMapRotateRightBtn')?.addEventListener('click', () => {
+    rotateMapBy(15);
+  });
+
   document.getElementById('peopleMapSearchInput')?.addEventListener('input', (event) => {
     state.searchText = safeText(event.target.value);
     renderPeopleList();

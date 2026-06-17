@@ -142,11 +142,46 @@ body {
   gap: 0.8rem;
 }
 
+.people-map-map-shell {
+  position: relative;
+}
+
 #peopleMapCanvas {
   min-height: 76vh;
   height: 76vh;
   border: 1px solid #d8dee9;
   border-radius: 12px;
+}
+
+.people-map-top-controls {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.people-map-top-controls .btn-group {
+  pointer-events: auto;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.15);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.people-map-top-controls .btn {
+  min-width: 84px;
+}
+
+.people-map-top-controls .btn.active,
+.people-map-rotate-tools .btn.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
 }
 
 .people-map-detail {
@@ -540,6 +575,10 @@ body {
 
   .people-map-canvas {
     grid-template-columns: 1fr;
+  }
+
+  .people-map-top-controls {
+    flex-wrap: wrap;
   }
 
   #peopleMapCanvas,
