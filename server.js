@@ -4,6 +4,7 @@ const fs = require('fs/promises');
 const express = require('express');
 const session = require('express-session');
 const multer = require('multer');
+const mysql = require('mysql2/promise');
 const XLSX = require('xlsx');
 const cheerio = require('cheerio');
 const { parse } = require('csv-parse/sync');
@@ -42,6 +43,7 @@ const PEOPLE_UPLOADS_DIR = path.join(__dirname, 'public', 'uploads', 'people');
 const ALLOWED_PHOTO_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const PEOPLE_DIRECTORY_DEFAULT_PAGE_SIZE = 50;
 const PEOPLE_DIRECTORY_PAGE_SIZES = [25, 50, 100];
+let clubKidsPoolPromise;
 
 function id() {
   return crypto.randomUUID();
@@ -176,6 +178,69 @@ function mapProfileSummary(person) {
   };
 }
 
+function normalizeSourcePhotoUrl(value, baseUrl = '') {
+  const url = normalize(value);
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url)) return url;
+  const normalizedBase = normalize(baseUrl).replace(/\/+$/, '');
+  if (!normalizedBase) return url;
+  return `${normalizedBase}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
+function normalizeNameKey(value) {
+  return stripDiacritics(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function useClubKidsDatabase() {
+  return Boolean(
+    process.env.CLUBKIDS_DB_HOST &&
+      process.env.CLUBKIDS_DB_NAME &&
+      process.env.CLUBKIDS_DB_USER &&
+      process.env.CLUBKIDS_DB_PASSWORD
+  );
+}
+
+async function getClubKidsPool() {
+  if (!clubKidsPoolPromise) {
+    clubKidsPoolPromise = mysql.createPool({
+      host: process.env.CLUBKIDS_DB_HOST,
+      port: Number(process.env.CLUBKIDS_DB_PORT || 3306),
+      user: process.env.CLUBKIDS_DB_USER,
+      password: process.env.CLUBKIDS_DB_PASSWORD,
+      database: process.env.CLUBKIDS_DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 5,
+      dateStrings: true
+    });
+  }
+
+  return clubKidsPoolPromise;
+}
+
+async function readClubKidsKids() {
+  if (!useClubKidsDatabase()) {
+    return [];
+  }
+
+  const pool = await getClubKidsPool();
+  const [rows] = await pool.query(
+    'SELECT id, name, birthday, photo_url, points, created_at FROM kids ORDER BY name'
+  );
+
+  return (rows || []).map((row) => ({
+    id: String(row.id),
+    name: normalize(row.name) || 'Unnamed',
+    nameKey: normalizeNameKey(row.name),
+    birthday: normalize(row.birthday),
+    photoUrl: normalizeSourcePhotoUrl(row.photo_url, process.env.CLUBKIDS_BASE_URL || 'https://clubkids.meuibbv.com'),
+    points: Number.parseInt(row.points, 10) || 0,
+    createdAt: normalize(row.created_at)
+  }));
+}
+
 function personAddressSummary(person) {
   return [person.address, person.city, person.state, person.zipCode]
     .map((part) => normalize(part))
@@ -216,7 +281,7 @@ function summarizeNextFollowUp(followUps = []) {
     : null;
 }
 
-function buildPeopleMapItem(person, followUps = [], visits = []) {
+function buildPeopleMapItem(person, followUps = [], visits = [], clubKidsMatch = null) {
   const tags = normalizePersonTags(person.tags);
   const membershipType = normalizeMembershipType(person.membershipType);
   const phone = normalize(person.phone);
@@ -237,14 +302,23 @@ function buildPeopleMapItem(person, followUps = [], visits = []) {
     notes: normalize(person.notes),
     sectionId: normalize(person.sectionId),
     email: normalize(person.email),
-    photoUrl: normalizePhotoUrl(person.photoUrl),
+    photoUrl: normalizePhotoUrl(person.photoUrl) || normalize(clubKidsMatch?.photoUrl),
+    birthday: normalize(person.birthday) || normalize(clubKidsMatch?.birthday),
     archivedAt: normalize(person.archivedAt),
     openFollowUps: followUps.filter((entry) => normalize(entry.status) !== 'completed').length,
     latestVisit: summarizeLatestVisit(visits),
     nextFollowUp: summarizeNextFollowUp(followUps),
     profileUrl: `/people/${person.id}`,
     visitsUrl: `/people/${person.id}?tab=visits`,
-    followUpsUrl: `/people/${person.id}?tab=followups`
+    followUpsUrl: `/people/${person.id}?tab=followups`,
+    clubKids: clubKidsMatch
+      ? {
+          id: clubKidsMatch.id,
+          birthday: normalize(clubKidsMatch.birthday),
+          photoUrl: normalize(clubKidsMatch.photoUrl),
+          points: Number.parseInt(clubKidsMatch.points, 10) || 0
+        }
+      : null
   };
 }
 
@@ -2530,8 +2604,15 @@ app.get('/people-map', async (req, res, next) => {
       return state;
     });
     const data = await readData();
+    const clubKids = await readClubKidsKids().catch(() => []);
     const churchSettings = hydrateChurchSettings((data.settings || {}).church);
     const people = Array.isArray(data.people) ? data.people : [];
+    const clubKidsByName = clubKids.reduce((acc, item) => {
+      if (!item.nameKey) return acc;
+      acc[item.nameKey] = acc[item.nameKey] || [];
+      acc[item.nameKey].push(item);
+      return acc;
+    }, {});
     const followUpsByPerson = (data.followUps || []).reduce((acc, entry) => {
       const personId = normalize(entry.personId);
       if (!personId) return acc;
@@ -2548,7 +2629,16 @@ app.get('/people-map', async (req, res, next) => {
     }, {});
 
     const items = sortByName(people)
-      .map((person) => buildPeopleMapItem(person, followUpsByPerson[person.id] || [], visitsByPerson[person.id] || []));
+      .map((person) => {
+        const matches = clubKidsByName[normalizeNameKey(person.name)] || [];
+        const clubKidsMatch = matches.length === 1 ? matches[0] : null;
+        return buildPeopleMapItem(
+          person,
+          followUpsByPerson[person.id] || [],
+          visitsByPerson[person.id] || [],
+          clubKidsMatch
+        );
+      });
 
     const tags = Array.from(
       new Set(
@@ -2583,7 +2673,11 @@ app.get('/people-map', async (req, res, next) => {
           tags,
           membershipTypes
         },
-        initialSelectionId: normalize(req.query.personId)
+        initialSelectionId: normalize(req.query.personId),
+        clubKids: {
+          connected: useClubKidsDatabase(),
+          totalKids: clubKids.length
+        }
       }
     });
   } catch (err) {

@@ -81,9 +81,9 @@ body {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
-.people-map-person-dot {
-  width: 0.8rem;
-  height: 0.8rem;
+.people-map-person-accent {
+  width: 0.3rem;
+  align-self: stretch;
   border-radius: 999px;
   flex: 0 0 auto;
 }
@@ -100,6 +100,40 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.people-map-person-meta {
+  color: #4b5563;
+}
+
+.people-map-person-badges {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: end;
+}
+
+.people-map-avatar {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid #d8dee9;
+  background: #f8fafc;
+  flex: 0 0 auto;
+}
+
+.people-map-avatar-sm {
+  width: 2.35rem;
+  height: 2.35rem;
+}
+
+.people-map-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  color: #1d4ed8;
+  font-weight: 700;
 }
 
 .people-map-canvas {
@@ -138,6 +172,18 @@ body {
   align-items: start;
   gap: 0.75rem;
   margin-bottom: 1rem;
+}
+
+.people-map-detail-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.people-map-detail-header-meta {
+  display: grid;
+  gap: 0.4rem;
+  justify-items: end;
 }
 
 .people-map-detail-header h4 {
@@ -186,6 +232,14 @@ body {
 
 .people-map-location-search {
   min-width: 240px;
+}
+
+.people-map-source-card {
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 0.7rem 0.8rem;
 }
 
 .page-visitation .page-wrapper > .container-xl.py-3 {

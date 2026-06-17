@@ -6,7 +6,8 @@ const boot = window.__PEOPLE_MAP_BOOTSTRAP__ || {
   church: { name: '', lat: '', lng: '' },
   items: [],
   filters: { tags: [], membershipTypes: [] },
-  initialSelectionId: ''
+  initialSelectionId: '',
+  clubKids: { connected: false, totalKids: 0 }
 };
 
 const state = {
@@ -68,14 +69,58 @@ function normalizeItem(item) {
     sectionId: safeText(item?.sectionId),
     email: safeText(item?.email),
     photoUrl: safeText(item?.photoUrl),
+    birthday: safeText(item?.birthday),
     archivedAt: safeText(item?.archivedAt),
     openFollowUps: Number.isFinite(Number(item?.openFollowUps)) ? Number(item.openFollowUps) : 0,
     latestVisit: item?.latestVisit || null,
     nextFollowUp: item?.nextFollowUp || null,
     profileUrl: safeText(item?.profileUrl),
     visitsUrl: safeText(item?.visitsUrl),
-    followUpsUrl: safeText(item?.followUpsUrl)
+    followUpsUrl: safeText(item?.followUpsUrl),
+    clubKids: item?.clubKids
+      ? {
+          id: safeText(item.clubKids.id),
+          birthday: safeText(item.clubKids.birthday),
+          photoUrl: safeText(item.clubKids.photoUrl),
+          points: Number.isFinite(Number(item.clubKids.points)) ? Number(item.clubKids.points) : 0
+        }
+      : null
   };
+}
+
+function formatBirthday(value) {
+  const raw = safeText(value);
+  if (!raw) return '';
+  const date = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function calculateAge(value) {
+  const raw = safeText(value);
+  if (!raw) return null;
+  const birthday = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(birthday.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - birthday.getFullYear();
+  const hasHadBirthday =
+    now.getMonth() > birthday.getMonth() ||
+    (now.getMonth() === birthday.getMonth() && now.getDate() >= birthday.getDate());
+  if (!hasHadBirthday) age -= 1;
+  return age >= 0 ? age : null;
+}
+
+function renderAvatar(item, size = 'lg') {
+  const classes = size === 'sm' ? 'people-map-avatar people-map-avatar-sm' : 'people-map-avatar';
+  if (item.photoUrl) {
+    return `<img class="${classes}" src="${escapeHtml(item.photoUrl)}" alt="${escapeHtml(item.name)}" loading="lazy" />`;
+  }
+  const initial = escapeHtml((item.name || '?').charAt(0).toUpperCase() || '?');
+  return `<span class="${classes} people-map-avatar-fallback">${initial}</span>`;
 }
 
 function getFilteredItems() {
@@ -158,13 +203,23 @@ function renderPeopleList() {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = `people-map-person ${state.selectedId === item.id ? 'active' : ''}`;
+    const birthdayLabel = formatBirthday(item.birthday);
     row.innerHTML = `
-      <span class="people-map-person-dot" style="background:${badgeColorForItem(item)};"></span>
+      <span class="people-map-person-accent" style="background:${badgeColorForItem(item)};"></span>
+      ${renderAvatar(item, 'sm')}
       <span class="people-map-person-main">
         <strong>${escapeHtml(item.name)}</strong>
         <small>${escapeHtml(item.address || item.membershipType || 'No address yet')}</small>
+        ${
+          birthdayLabel
+            ? `<small class="people-map-person-meta">Birthday: ${escapeHtml(birthdayLabel)}</small>`
+            : ''
+        }
       </span>
-      <span class="badge ${item.lat && item.lng ? 'bg-green-lt' : 'bg-secondary-lt'}">${item.lat && item.lng ? 'Pinned' : 'Needs pin'}</span>
+      <span class="people-map-person-badges">
+        ${item.clubKids ? '<span class="badge bg-orange-lt">ClubKids</span>' : ''}
+        <span class="badge ${item.lat && item.lng ? 'bg-green-lt' : 'bg-secondary-lt'}">${item.lat && item.lng ? 'Pinned' : 'Needs pin'}</span>
+      </span>
     `;
     row.addEventListener('click', () => {
       selectPerson(item.id, { focus: true });
@@ -197,19 +252,35 @@ function renderDetail() {
     : '<div><strong>Next follow-up:</strong> none open</div>';
   const directionsUrl = item.lat && item.lng ? `https://www.google.com/maps?q=${item.lat},${item.lng}` : '';
   const safeTags = item.tags.map((tag) => `<span class="badge bg-secondary-lt">${escapeHtml(tag)}</span>`).join(' ');
+  const birthdayLabel = formatBirthday(item.birthday);
+  const age = calculateAge(item.birthday);
+  const birthdayLine = birthdayLabel
+    ? `<div><strong>Birthday:</strong> ${escapeHtml(birthdayLabel)}${age !== null ? ` · Age ${age}` : ''}</div>`
+    : '<div><strong>Birthday:</strong> not saved yet</div>';
+  const clubKidsLine = item.clubKids
+    ? `<div class="people-map-source-card"><strong>ClubKids:</strong> linked child profile${item.clubKids.points ? ` · ${item.clubKids.points} points` : ''}</div>`
+    : '';
 
   root.innerHTML = `
     <div class="people-map-detail-card">
       <div class="people-map-detail-header">
-        <div>
-          <h4>${escapeHtml(item.name)}</h4>
-          <p>${escapeHtml(item.membershipType || 'No membership type')}${item.sectionId ? ` · ${escapeHtml(item.sectionId)}` : ''}</p>
+        <div class="people-map-detail-identity">
+          ${renderAvatar(item)}
+          <div>
+            <h4>${escapeHtml(item.name)}</h4>
+            <p>${escapeHtml(item.membershipType || 'No membership type')}${item.sectionId ? ` · ${escapeHtml(item.sectionId)}` : ''}</p>
+          </div>
         </div>
-        <span class="badge ${item.archivedAt ? 'bg-yellow-lt' : 'bg-azure-lt'}">${item.archivedAt ? 'Archived' : `${item.openFollowUps} open follow-ups`}</span>
+        <div class="people-map-detail-header-meta">
+          ${item.clubKids ? '<span class="badge bg-orange-lt">ClubKids Sync</span>' : ''}
+          <span class="badge ${item.archivedAt ? 'bg-yellow-lt' : 'bg-azure-lt'}">${item.archivedAt ? 'Archived' : `${item.openFollowUps} open follow-ups`}</span>
+        </div>
       </div>
       <div class="people-map-detail-body">
         <div>${escapeHtml(item.address || 'No address saved yet.')}</div>
         <div>${escapeHtml(item.phone || 'No phone')}${item.email ? ` · ${escapeHtml(item.email)}` : ''}</div>
+        ${birthdayLine}
+        ${clubKidsLine}
         <div class="people-map-tag-row">${safeTags || '<span class="text-secondary">No tags yet</span>'}</div>
         ${latestVisit}
         ${nextFollowUp}
@@ -441,6 +512,12 @@ function wireUi() {
 
 function init() {
   state.items = state.items.map((item) => normalizeItem(item));
+  const clubKidsSummary = document.getElementById('peopleMapClubKidsSummary');
+  if (clubKidsSummary) {
+    clubKidsSummary.textContent = boot.clubKids?.connected
+      ? `${Number(boot.clubKids.totalKids) || 0} ClubKids records available for enrichment`
+      : 'ClubKids sync is off';
+  }
   initializeMap();
   renderChipGroup('peopleMapMembershipFilters', boot.filters?.membershipTypes || [], state.membershipFilter, (value) => {
     state.membershipFilter = value;
