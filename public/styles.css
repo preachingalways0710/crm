@@ -178,10 +178,21 @@ body {
 }
 
 .people-map-top-controls .btn.active,
+.people-map-pin-toggle.active,
 .people-map-rotate-tools .btn.active {
   background: #2563eb;
   color: #ffffff;
   border-color: #2563eb;
+}
+
+.people-map-pin-toggle {
+  pointer-events: auto;
+  min-width: 96px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.15);
+}
+
+#peopleMapCanvas.pin-mode-active {
+  cursor: crosshair;
 }
 
 .people-map-detail {

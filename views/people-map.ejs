@@ -62,9 +62,14 @@
           <div class="people-map-canvas">
             <div class="people-map-map-shell">
               <div class="people-map-top-controls">
-                <div class="btn-group btn-group-sm" role="group" aria-label="Map style">
-                  <button type="button" class="btn btn-light" id="peopleMapStandardBtn">Standard</button>
-                  <button type="button" class="btn btn-light active" id="peopleMapSatelliteBtn">Satellite</button>
+                <div class="d-flex gap-2 flex-wrap">
+                  <div class="btn-group btn-group-sm" role="group" aria-label="Map style">
+                    <button type="button" class="btn btn-light" id="peopleMapStandardBtn">Standard</button>
+                    <button type="button" class="btn btn-light active" id="peopleMapSatelliteBtn">Satellite</button>
+                  </div>
+                  <button type="button" class="btn btn-sm btn-light people-map-pin-toggle" id="peopleMapTogglePinModeBtn" title="Turn pin placement on or off">
+                    Pin Off
+                  </button>
                 </div>
                 <div class="btn-group btn-group-sm people-map-rotate-tools" role="group" aria-label="Map rotation">
                   <button type="button" class="btn btn-light" id="peopleMapRotateLeftBtn" title="Rotate left">↺</button>

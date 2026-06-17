@@ -166,6 +166,46 @@ function statusText(message) {
   }
 }
 
+function updatePinModeControls() {
+  const sidebarBtn = document.getElementById('peopleMapPlacePinBtn');
+  const toggleBtn = document.getElementById('peopleMapTogglePinModeBtn');
+  const canvas = document.getElementById('peopleMapCanvas');
+  const hasSelection = Boolean(state.selectedId);
+
+  if (sidebarBtn) {
+    sidebarBtn.disabled = !hasSelection;
+    sidebarBtn.textContent = state.placingMode ? 'Pin Mode On' : 'Place / Update Pin';
+  }
+
+  if (toggleBtn) {
+    toggleBtn.disabled = !hasSelection;
+    toggleBtn.classList.toggle('active', state.placingMode);
+    toggleBtn.textContent = state.placingMode ? 'Pin On' : 'Pin Off';
+    toggleBtn.title = hasSelection
+      ? 'Turn pin placement on or off'
+      : 'Select a person first to place a pin';
+  }
+
+  if (canvas) {
+    canvas.classList.toggle('pin-mode-active', state.placingMode);
+  }
+}
+
+function togglePinMode() {
+  if (!state.selectedId) {
+    statusText('Select a person first, then turn pin mode on.');
+    return;
+  }
+  state.placingMode = !state.placingMode;
+  renderDetail();
+  updatePinModeControls();
+  statusText(
+    state.placingMode
+      ? 'Pin mode is on. Move the map and click where this person should be pinned.'
+      : 'Pin mode is off.'
+  );
+}
+
 function createBaseLayer(mode) {
   if (mode === 'standard') {
     return L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -313,8 +353,9 @@ function renderDetail() {
 
   if (placeBtn) {
     placeBtn.disabled = !item;
-    placeBtn.textContent = state.placingMode ? 'Click Map To Save Pin' : 'Place / Update Pin';
   }
+
+  updatePinModeControls();
 
   if (!item) {
     root.innerHTML = '<div class="people-map-detail-empty">Click a pin or choose a person from the list to open their contact card.</div>';
@@ -508,6 +549,7 @@ function initializeMap() {
       renderPeopleList();
       renderMarkers();
       renderDetail();
+      updatePinModeControls();
       focusSelectedPerson();
       statusText(`Pin updated for "${item.name}".`);
     } catch (error) {
@@ -572,14 +614,11 @@ function wireUi() {
   });
 
   document.getElementById('peopleMapPlacePinBtn')?.addEventListener('click', () => {
-    if (!state.selectedId) return;
-    state.placingMode = !state.placingMode;
-    renderDetail();
-    statusText(
-      state.placingMode
-        ? 'Click the map where this person should be pinned.'
-        : 'Select a person to focus their pin, move it, or log a visit from the map.'
-    );
+    togglePinMode();
+  });
+
+  document.getElementById('peopleMapTogglePinModeBtn')?.addEventListener('click', () => {
+    togglePinMode();
   });
 
   document.getElementById('peopleMapClearSelectionBtn')?.addEventListener('click', () => {
@@ -588,6 +627,7 @@ function wireUi() {
     renderPeopleList();
     renderMarkers();
     renderDetail();
+    updatePinModeControls();
     statusText('Selection cleared.');
   });
 
@@ -627,6 +667,7 @@ function init() {
   renderPeopleList();
   renderMarkers();
   renderDetail();
+  updatePinModeControls();
 
   if (state.selectedId) {
     focusSelectedPerson();
