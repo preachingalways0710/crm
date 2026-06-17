@@ -3180,7 +3180,12 @@ app.post('/import/clubkids', requireAdmin, async (req, res, next) => {
 
     return res.redirect(`/import?${params.toString()}`);
   } catch (err) {
-    return next(err);
+    const params = new URLSearchParams({
+      imported: '0',
+      skipped: '0',
+      message: `ClubKids import failed: ${normalize(err.message) || 'Unknown error'}`
+    });
+    return res.redirect(`/import?${params.toString()}`);
   }
 });
 
