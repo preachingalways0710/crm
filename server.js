@@ -3004,6 +3004,11 @@ app.options('/api/integrations/clubkids/webhook', (req, res) => {
   return res.status(204).end();
 });
 
+app.options('/api/integrations/clubkids/bulk-sync', (req, res) => {
+  applyClubKidsCors(req, res);
+  return res.status(204).end();
+});
+
 app.post('/api/integrations/clubkids/webhook', async (req, res, next) => {
   try {
     applyClubKidsCors(req, res);
@@ -3057,6 +3062,48 @@ app.post('/api/integrations/clubkids/webhook', async (req, res, next) => {
     });
 
     return res.json({ ok: true, action, ...result });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/api/integrations/clubkids/bulk-sync', async (req, res, next) => {
+  try {
+    applyClubKidsCors(req, res);
+    if (!isClubKidsWebhookAuthorized(req)) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    }
+
+    const rawKids = Array.isArray(req.body?.kids) ? req.body.kids : [];
+    const kids = rawKids
+      .map((entry) => ({
+        id: normalize(entry?.id),
+        name: normalize(entry?.name),
+        birthday: normalize(entry?.birthday),
+        photoUrl: normalizeSourcePhotoUrl(entry?.photo_url || entry?.photoUrl, process.env.CLUBKIDS_BASE_URL || 'https://clubkids.meuibbv.com'),
+        points: 0,
+        nameKey: normalizeNameKey(entry?.name)
+      }))
+      .filter((entry) => entry.id && entry.name);
+
+    let created = 0;
+    let updated = 0;
+
+    await updateData((state) => {
+      kids.forEach((kid) => {
+        const result = upsertClubKidsKidPerson(state, kid);
+        if (result.created) created += 1;
+        if (result.updated) updated += 1;
+      });
+      return state;
+    });
+
+    return res.json({
+      ok: true,
+      received: kids.length,
+      created,
+      updated
+    });
   } catch (err) {
     return next(err);
   }
