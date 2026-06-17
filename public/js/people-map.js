@@ -20,6 +20,7 @@ const state = {
   membershipFilter: '',
   tagFilter: '',
   placingMode: false,
+  churchBaseMode: false,
   markersById: new Map(),
   mapStyle: 'satellite',
   bearing: -28
@@ -169,6 +170,7 @@ function statusText(message) {
 function updatePinModeControls() {
   const sidebarBtn = document.getElementById('peopleMapPlacePinBtn');
   const toggleBtn = document.getElementById('peopleMapTogglePinModeBtn');
+  const churchBtn = document.getElementById('peopleMapToggleChurchBaseBtn');
   const canvas = document.getElementById('peopleMapCanvas');
   const hasSelection = Boolean(state.selectedId);
 
@@ -186,8 +188,14 @@ function updatePinModeControls() {
       : 'Select a person first to place a pin';
   }
 
+  if (churchBtn) {
+    churchBtn.classList.toggle('active', state.churchBaseMode);
+    churchBtn.textContent = state.churchBaseMode ? 'Church Base On' : 'Church Base';
+    churchBtn.title = 'Set the church base pin';
+  }
+
   if (canvas) {
-    canvas.classList.toggle('pin-mode-active', state.placingMode);
+    canvas.classList.toggle('pin-mode-active', state.placingMode || state.churchBaseMode);
   }
 }
 
@@ -196,6 +204,7 @@ function togglePinMode() {
     statusText('Select a person first, then turn pin mode on.');
     return;
   }
+  state.churchBaseMode = false;
   state.placingMode = !state.placingMode;
   renderDetail();
   updatePinModeControls();
@@ -203,6 +212,17 @@ function togglePinMode() {
     state.placingMode
       ? 'Pin mode is on. Move the map and click where this person should be pinned.'
       : 'Pin mode is off.'
+  );
+}
+
+function toggleChurchBaseMode() {
+  state.placingMode = false;
+  state.churchBaseMode = !state.churchBaseMode;
+  updatePinModeControls();
+  statusText(
+    state.churchBaseMode
+      ? 'Church base mode is on. Click the exact church location on the map.'
+      : 'Church base mode is off.'
   );
 }
 
@@ -534,17 +554,67 @@ function initializeMap() {
   }
 
   map.on('click', async (event) => {
+    if (state.churchBaseMode) {
+      try {
+        const response = await api('/api/people-map/church-location', {
+          method: 'POST',
+          body: JSON.stringify({ lat: event.latlng.lat, lng: event.latlng.lng })
+        });
+        boot.church = {
+          ...(boot.church || {}),
+          name: response.church?.name || boot.church?.name || 'Church Base',
+          lat: response.church?.lat || safeText(event.latlng.lat),
+          lng: response.church?.lng || safeText(event.latlng.lng)
+        };
+        state.churchBaseMode = false;
+        if (churchMarker) {
+          churchMarker.setLatLng([Number.parseFloat(boot.church.lat), Number.parseFloat(boot.church.lng)]);
+        }
+        updatePinModeControls();
+        statusText('Church base updated.');
+      } catch (error) {
+        window.alert(error.message || 'Could not update church base.');
+      }
+      return;
+    }
+
     if (!state.placingMode || !state.selectedId) return;
     const item = state.items.find((entry) => entry.id === state.selectedId);
     if (!item) return;
     try {
-      const payload = { lat: event.latlng.lat, lng: event.latlng.lng };
+      let resolvedAddress = '';
+      try {
+        const reverse = await api('/api/people-map/reverse-geocode', {
+          method: 'POST',
+          body: JSON.stringify({ lat: event.latlng.lat, lng: event.latlng.lng })
+        });
+        resolvedAddress = safeText(reverse.address);
+      } catch {
+        resolvedAddress = '';
+      }
+
+      let nextAddress = '';
+      if (resolvedAddress) {
+        const shouldApplyAddress = window.confirm(
+          `Use this address for "${item.name}"?\n\n${resolvedAddress}`
+        );
+        if (shouldApplyAddress) {
+          nextAddress = resolvedAddress;
+        }
+      }
+
+      const payload = {
+        lat: event.latlng.lat,
+        lng: event.latlng.lng,
+        address: nextAddress
+      };
       const response = await api(`/api/people-map/people/${item.id}/location`, {
         method: 'POST',
         body: JSON.stringify(payload)
       });
       item.lat = response.person?.lat || item.lat;
       item.lng = response.person?.lng || item.lng;
+      item.address = response.person?.address || item.address;
       state.placingMode = false;
       renderPeopleList();
       renderMarkers();
@@ -621,9 +691,14 @@ function wireUi() {
     togglePinMode();
   });
 
+  document.getElementById('peopleMapToggleChurchBaseBtn')?.addEventListener('click', () => {
+    toggleChurchBaseMode();
+  });
+
   document.getElementById('peopleMapClearSelectionBtn')?.addEventListener('click', () => {
     state.selectedId = '';
     state.placingMode = false;
+    state.churchBaseMode = false;
     renderPeopleList();
     renderMarkers();
     renderDetail();

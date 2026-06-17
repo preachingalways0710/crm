@@ -1398,6 +1398,63 @@ async function geocodeAddress(input) {
   return null;
 }
 
+function formatReverseGeocodeAddress(payload) {
+  const address = payload?.address && typeof payload.address === 'object' ? payload.address : {};
+  const streetLine = [
+    normalize(address.road || address.pedestrian || address.residential || address.cycleway || address.path),
+    normalize(address.house_number)
+  ]
+    .filter(Boolean)
+    .join(', ');
+  const locality = normalize(
+    address.suburb ||
+      address.neighbourhood ||
+      address.city ||
+      address.town ||
+      address.village ||
+      address.municipality
+  );
+  const region = normalize(address.state);
+  const postcode = normalize(address.postcode);
+  const parts = [streetLine, locality, region, postcode].filter(Boolean);
+  return normalize(parts.join(', ')) || normalize(payload?.display_name);
+}
+
+async function reverseGeocode(lat, lng) {
+  const normalizedLat = normalizeLatitude(lat);
+  const normalizedLng = normalizeLongitude(lng);
+  if (!normalizedLat || !normalizedLng) return null;
+
+  const url = new URL('https://nominatim.openstreetmap.org/reverse');
+  url.searchParams.set('format', 'jsonv2');
+  url.searchParams.set('lat', normalizedLat);
+  url.searchParams.set('lon', normalizedLng);
+  url.searchParams.set('zoom', '18');
+  url.searchParams.set('addressdetails', '1');
+
+  try {
+    const response = await fetchWithTimeout(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': 'pt-BR,en-US;q=0.8',
+        'User-Agent': 'ChurchCRM/1.0 (People Map Reverse Geocode)'
+      }
+    });
+
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const formatted = formatReverseGeocodeAddress(payload);
+    if (!formatted) return null;
+    return {
+      address: formatted,
+      displayName: normalize(payload?.display_name)
+    };
+  } catch {
+    return null;
+  }
+}
+
 function parsePessoasServiceType(value) {
   const raw = normalize(value).toLowerCase();
   if (!raw) return '';
@@ -3445,6 +3502,7 @@ app.post('/api/people-map/people/:id/location', async (req, res, next) => {
   try {
     const lat = normalizeLatitude(req.body.lat);
     const lng = normalizeLongitude(req.body.lng);
+    const nextAddress = normalize(req.body.address);
 
     if (!lat || !lng) {
       return res.status(400).json({ error: 'Valid latitude and longitude are required.' });
@@ -3456,11 +3514,15 @@ app.post('/api/people-map/people/:id/location', async (req, res, next) => {
       if (!person) return data;
       person.mapLat = lat;
       person.mapLng = lng;
+      if (nextAddress) {
+        person.address = nextAddress;
+      }
       person.updatedAt = new Date().toISOString();
       updated = {
         id: person.id,
         lat: person.mapLat,
-        lng: person.mapLng
+        lng: person.mapLng,
+        address: normalize(person.address)
       };
       return data;
     });
@@ -3470,6 +3532,64 @@ app.post('/api/people-map/people/:id/location', async (req, res, next) => {
     }
 
     return res.json({ ok: true, person: updated });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/api/people-map/reverse-geocode', async (req, res, next) => {
+  try {
+    const lat = normalizeLatitude(req.body.lat);
+    const lng = normalizeLongitude(req.body.lng);
+
+    if (!lat || !lng) {
+      return res.status(400).json({ error: 'Valid latitude and longitude are required.' });
+    }
+
+    const result = await reverseGeocode(lat, lng);
+    return res.json({
+      ok: true,
+      address: result?.address || '',
+      displayName: result?.displayName || ''
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post('/api/people-map/church-location', requireAdmin, async (req, res, next) => {
+  try {
+    const lat = normalizeLatitude(req.body.lat);
+    const lng = normalizeLongitude(req.body.lng);
+
+    if (!lat || !lng) {
+      return res.status(400).json({ error: 'Valid latitude and longitude are required.' });
+    }
+
+    let updatedChurch = null;
+    await updateData((data) => {
+      data.settings = data.settings || {};
+      const existingChurch = hydrateChurchSettings((data.settings || {}).church);
+      data.settings.church = {
+        ...existingChurch,
+        mapLat: lat,
+        mapLng: lng
+      };
+
+      const mergedVisitation = mergeVisitationWithChurchSettings(
+        hydrateVisitationSettings((data.settings || {}).visitation, data.people || []),
+        data.settings.church
+      );
+      data.settings.visitation = mergedVisitation;
+      updatedChurch = {
+        name: mergedVisitation.churchProfile.name || existingChurch.name,
+        lat,
+        lng
+      };
+      return data;
+    });
+
+    return res.json({ ok: true, church: updatedChurch });
   } catch (err) {
     return next(err);
   }
