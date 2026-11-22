@@ -383,6 +383,23 @@ progress::-moz-progress-bar {
   border-radius: 3px;
   background: #26855e;
 }
+.swatch.sparse {
+  width: 21px;
+  border-top: 3px dashed #b1353d;
+}
+#housingChoice {
+  flex-basis: 100%;
+}
+#housingChoice select {
+  margin-inline-start: 0.4rem;
+  padding: 0.45rem;
+  min-height: 44px;
+}
+#housingPanel summary {
+  margin-top: 1rem;
+  cursor: pointer;
+  font-weight: 600;
+}
 .swatch.pin {
   width: 10px;
   height: 10px;

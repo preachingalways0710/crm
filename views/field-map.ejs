@@ -53,17 +53,23 @@
           </svg>
           <div class="zoom"><button id="plus" aria-label="Zoom in">+</button><button id="minus" aria-label="Zoom out">−</button><button id="fit" aria-label="Fit map"><svg><use href="#fit-icon"/></svg></button></div>
         </div>
-        <div class="map-bottom"><div class="legend"><span><i class="swatch line"></i>Walked</span><span><i class="swatch pin"></i>Follow-up</span><span><i class="swatch complete"></i>Completed zone</span></div>
+        <div class="map-bottom"><div class="legend"><span><i class="swatch line"></i>Walked</span><span><i class="swatch sparse"></i>Few or no homes</span><span><i class="swatch pin"></i>Follow-up</span><span><i class="swatch complete"></i>Completed zone</span></div>
         <div id="tools" hidden>
           <button id="walk" class="primary"><svg><use href="#line-icon"/></svg>Mark a stretch</button>
           <button id="visit"><svg><use href="#pin-icon"/></svg>Pin follow-up</button>
+          <button id="housingTool"><i class="swatch sparse" aria-hidden="true"></i>Mark housing</button>
+          <label id="housingChoice" hidden>Homes on this stretch
+            <select id="housingKind"><option value="sparse">Few or no homes</option><option value="none">No homes</option><option value="one-two">1–2 homes</option></select>
+          </label>
           <p id="instruction" role="status" hidden></p>
           <button id="cancel" hidden>Cancel</button>
         </div></div>
       </section>
       <aside class="side"><div id="overview"><div class="side-head"><h2>Zones</h2><span>9</span></div><p class="hint">Choose a zone to mark your visit.</p><div id="zoneList"></div></div>
         <div id="detail" hidden><button id="allZones" class="back"><svg><use href="#back-icon"/></svg>All zones</button><h2 id="detailTitle"></h2><p id="landmark" class="hint"></p><div id="counts"></div>
-          <button id="zoneStatus"></button><h3>Return visits</h3><div id="returnList"></div><h3>Walked stretches</h3><div id="stretchList"></div></div>
+          <p class="hint" id="completionHint"></p>
+          <button id="zoneStatus" aria-describedby="completionHint"></button><h3>Return visits</h3><div id="returnList"></div><h3>Walked stretches</h3><div id="stretchList"></div>
+          <details id="housingPanel"><summary>Streets with few or no homes (<span id="housingCount"></span>)</summary><div id="housingList"></div></details></div>
       </aside>
     </div>
     <p id="message" role="status" aria-live="polite"></p>

@@ -3,6 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const { zones, state: loaded } = JSON.parse($('bootstrap').textContent);
   const town = $('town');
+  const housingLabels = { sparse: 'Few or no homes', none: 'No homes', 'one-two': '1–2 homes' };
   const overview = [45, 99, 1310, 976];
   let state = loaded;
   let zone,
@@ -124,7 +125,8 @@
 
   function updateTools() {
     $('tools').hidden = !zone;
-    $('walk').hidden = $('visit').hidden = Boolean(mode);
+    $('walk').hidden = $('visit').hidden = $('housingTool').hidden = Boolean(mode);
+    $('housingChoice').hidden = mode !== 'housing';
     $('cancel').hidden = !mode;
     $('instruction').hidden = !mode;
     $('instruction').textContent =
@@ -175,6 +177,7 @@
     if (zone?.id !== mark.zoneId) choose(mark.zoneId, false);
     selectedMark = mark.id;
     render();
+    if (mark.housing) $('housingPanel').open = true;
     $('item-' + mark.id)?.scrollIntoView({ block: 'nearest' });
   }
 
@@ -182,7 +185,7 @@
     const root = $('marks');
     root.replaceChildren();
     const scale = Math.min(1.7, Math.max(0.34, 1 / town.getScreenCTM().a));
-    for (const s of state.stretches) {
+    for (const s of [...state.stretches, ...(state.housing || [])]) {
       const group = svg(root, 'g', { 'data-mark': s.id, opacity: !zone || s.zoneId === zone.id ? 1 : 0.45 });
       const attrs = {
         x1: s.start[0],
@@ -192,12 +195,23 @@
         'stroke-linecap': 'round',
         'vector-effect': 'non-scaling-stroke'
       };
-      svg(group, 'line', { ...attrs, stroke: 'white', 'stroke-width': 8 });
-      svg(group, 'line', {
-        ...attrs,
-        stroke: s.id === selectedMark ? '#184632' : '#26855e',
-        'stroke-width': 5
-      });
+      if (s.housing) {
+        // Leave gaps so walked coverage underneath stays visible.
+        svg(group, 'line', {
+          ...attrs,
+          stroke: s.id === selectedMark ? '#801722' : '#b1353d',
+          'stroke-width': 3,
+          'stroke-dasharray': s.housing === 'none' ? '1 6' : '7 6'
+        });
+        svg(group, 'title', {}, housingLabels[s.housing]);
+      } else {
+        svg(group, 'line', { ...attrs, stroke: 'white', 'stroke-width': 8 });
+        svg(group, 'line', {
+          ...attrs,
+          stroke: s.id === selectedMark ? '#184632' : '#26855e',
+          'stroke-width': 5
+        });
+      }
       svg(group, 'line', { ...attrs, stroke: 'transparent', 'stroke-width': 18 });
     }
     for (const pin of state.pins) {
@@ -275,18 +289,24 @@
       list.append(row);
     }
 
-    const walked = stretches(zone.id);
-    const list2 = $('stretchList');
-    list2.replaceChildren();
-    if (!walked.length) list2.append(node('p', 'No stretches marked yet.', 'empty'));
-    walked
+    renderLines(stretches(zone.id), $('stretchList'), 'No stretches marked yet.');
+    const housing = (state.housing || []).filter((s) => s.zoneId === zone.id);
+    $('housingCount').textContent = housing.length;
+    renderLines(housing, $('housingList'), 'No housing marks yet.');
+  }
+
+  function renderLines(lines, list, emptyMessage) {
+    list.replaceChildren();
+    if (!lines.length) list.append(node('p', emptyMessage, 'empty'));
+    lines
       .slice()
       .reverse()
       .forEach((s, i) => {
         const row = node('div', undefined, 'entry');
         row.id = 'item-' + s.id;
         row.classList.toggle('highlight', s.id === selectedMark);
-        const show = node('button', 'Stretch ' + (walked.length - i));
+        const label = s.housing ? housingLabels[s.housing] : 'Stretch';
+        const show = node('button', label + ' ' + (s.housing ? '· ' : '') + (lines.length - i));
         show.type = 'button';
         show.onclick = () => {
           selectedMark = s.id;
@@ -297,11 +317,17 @@
         };
         const del = node('button', 'Remove', 'danger');
         del.onclick = () => {
-          if (confirm('Remove this walked stretch?'))
-            save('/api/field-map/stretches/' + s.id, 'DELETE', null, 'Stretch removed.');
+          const collection = s.housing ? 'housing' : 'stretches';
+          if (confirm(s.housing ? 'Remove this housing mark?' : 'Remove this walked stretch?'))
+            save('/api/field-map/' + collection + '/' + s.id, 'DELETE', null, 'Mark removed.');
         };
-        row.append(node('p', dateLabel(s.createdAt), 'item-meta'), show, ' ', del);
-        list2.append(row);
+        row.append(
+          node('p', s.createdAt ? dateLabel(s.createdAt) : 'From the paper map', 'item-meta'),
+          show,
+          ' ',
+          del
+        );
+        list.append(row);
       });
   }
 
@@ -343,7 +369,11 @@
         count(stretches(zone.id).length, 'stretch', 'stretches') +
         ' walked · ' +
         count(openPins(zone.id).length, 'open visit', 'open visits');
-      $('zoneStatus').textContent = state.completed.includes(zone.id) ? 'Reopen zone' : 'Mark zone complete';
+      const completed = state.completed.includes(zone.id);
+      $('completionHint').textContent = completed
+        ? 'This zone is marked complete.'
+        : 'Mark this zone complete once you’ve covered the homes on each street. Return visits can stay open.';
+      $('zoneStatus').textContent = completed ? 'Reopen zone' : 'Mark zone complete';
       renderEntries();
     }
     drawMarks();
@@ -397,12 +427,18 @@
         $('instruction').textContent = 'Tap inside Zone ' + zone.id + '.';
         return;
       }
-      if (mode === 'stretch' && start) {
+      if (mode !== 'pin' && start) {
         save(
           '/api/field-map/marks/' + id,
           'PUT',
-          { type: 'stretch', zoneId: zone.id, start, end: point },
-          'Walked stretch saved.'
+          {
+            type: mode,
+            zoneId: zone.id,
+            start,
+            end: point,
+            housing: mode === 'housing' ? $('housingKind').value : undefined
+          },
+          mode === 'housing' ? 'Street housing saved.' : 'Walked stretch saved.'
         );
       } else {
         start = point;
@@ -411,7 +447,7 @@
           cx: point[0],
           cy: point[1],
           r: 5 / town.getScreenCTM().a,
-          fill: '#297854',
+          fill: mode === 'housing' ? '#b1353d' : '#297854',
           stroke: '#fff',
           'stroke-width': 2,
           'vector-effect': 'non-scaling-stroke'
@@ -427,7 +463,8 @@
       return;
     }
     const markId = element?.closest('[data-mark]')?.dataset.mark;
-    const mark = markId && [...state.pins, ...state.stretches].find((m) => m.id === markId);
+    const mark =
+      markId && [...state.pins, ...state.stretches, ...(state.housing || [])].find((m) => m.id === markId);
     if (mark) return showMark(mark);
     const n = Number(element?.closest('[data-zone]')?.dataset.zone);
     if (n && n !== zone?.id) choose(n);
@@ -496,6 +533,7 @@
     fit();
     drawMarks();
   };
+  $('housingTool').onclick = () => edit('housing');
   $('walk').onclick = () => edit('stretch');
   $('visit').onclick = () => edit('pin');
   $('cancel').onclick = () => edit();

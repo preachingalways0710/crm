@@ -1,0 +1,18 @@
+[
+  {"id":"paper-1-west","zoneId":1,"start":[613,181],"end":[606,281],"housing":"sparse"},
+  {"id":"paper-1-east","zoneId":1,"start":[667,174],"end":[673,280],"housing":"sparse"},
+  {"id":"paper-1-top","zoneId":1,"start":[613,181],"end":[667,174],"housing":"sparse"},
+  {"id":"paper-1-upper-cross","zoneId":1,"start":[611,213],"end":[670,216],"housing":"sparse"},
+  {"id":"paper-1-lower-cross","zoneId":1,"start":[609,246],"end":[670,246],"housing":"sparse"},
+  {"id":"paper-1-bottom","zoneId":1,"start":[606,281],"end":[673,281],"housing":"sparse"},
+  {"id":"paper-1-shopping-north","zoneId":1,"start":[731,184],"end":[796,191],"housing":"sparse"},
+  {"id":"paper-1-shopping-south","zoneId":1,"start":[731,214],"end":[796,220],"housing":"sparse"},
+  {"id":"paper-4-north-west","zoneId":4,"start":[667,755],"end":[664,865],"housing":"sparse"},
+  {"id":"paper-4-north-east","zoneId":4,"start":[711,755],"end":[709,866],"housing":"sparse"},
+  {"id":"paper-4-praca","zoneId":4,"start":[708,878],"end":[706,992],"housing":"sparse"},
+  {"id":"paper-4-sao-luiz","zoneId":4,"start":[806,878],"end":[806,992],"housing":"sparse"},
+  {"id":"paper-4-belem","zoneId":4,"start":[823,878],"end":[824,992],"housing":"sparse"},
+  {"id":"paper-4-sete-setembro","zoneId":4,"start":[919,877],"end":[922,991],"housing":"sparse"},
+  {"id":"paper-4-costa-silva","zoneId":4,"start":[654,992],"end":[932,993],"housing":"sparse"},
+  {"id":"paper-9-costa-silva","zoneId":9,"start":[932,993],"end":[1106,992],"housing":"sparse"}
+]
