@@ -4271,8 +4271,8 @@ app.get('/followups', async (req, res, next) => {
           googleCalendarUrl: buildGoogleCalendarFollowUpUrl(person, item),
           thingsMailtoUrl: buildThingsMailtoUrl(integrationSettings.thingsEmail, person || temp, item),
           todoistSynced: isFollowUpTodoistSynced(item),
-          personName: person?.name || temp?.name || 'Unknown contact',
-          personLink: person ? `/people/${person.id}?tab=followups` : temp ? '/temporary-contacts' : '/people'
+          personName: person?.name || temp?.name || (item.fieldPoint ? `Zone ${item.fieldPoint.zoneId}` : 'Unknown contact'),
+          personLink: person ? `/people/${person.id}?tab=followups` : temp ? '/temporary-contacts' : item.fieldPoint ? `/map?zone=${item.fieldPoint.zoneId}&pin=${encodeURIComponent(item.id)}` : '/people'
         };
       })
       .sort((a, b) => {
@@ -5509,6 +5509,8 @@ function hydrateMarker(marker, index = 0) {
     lng
   };
 }
+
+app.use(require('./lib/fieldMap'));
 
 app.get('/visitation', async (req, res, next) => {
   try {

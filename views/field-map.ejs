@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#173e36">
+  <title>Visitation map · Itapuã do Oeste</title>
+  <link rel="stylesheet" href="/static/field-map.css">
+</head>
+<body>
+  <svg class="symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <symbol id="map-icon" viewBox="0 0 24 24"><path d="m2 5 6-3 8 4 6-3v16l-6 3-8-4-6 3zM8 2v16m8-12v16"/></symbol>
+      <symbol id="pin-icon" viewBox="0 0 24 24"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0Z"/><circle cx="12" cy="10" r="2.3"/></symbol>
+      <symbol id="line-icon" viewBox="0 0 24 24"><circle cx="5" cy="18" r="3"/><circle cx="19" cy="6" r="3"/><path d="m7.5 16 9-8"/></symbol>
+      <symbol id="fit-icon" viewBox="0 0 24 24"><path d="M3 9V3h6m6 0h6v6m0 6v6h-6M9 21H3v-6"/></symbol>
+      <symbol id="back-icon" viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></symbol>
+    </defs>
+  </svg>
+  <header class="mast"><div class="mast-inner">
+    <a href="/map" class="brand"><span class="brand-mark"><svg><use href="#map-icon"/></svg></span>Visitation</a>
+    <a href="/people" class="dashboard-link">CRM dashboard</a>
+  </div></header>
+  <main>
+    <div class="title-row"><div><p class="location"><svg><use href="#pin-icon"/></svg> Itapuã do Oeste, RO</p><h1>Visitation map</h1></div>
+      <div class="total"><div><strong id="totalDone"></strong> zones complete</div><progress id="progress" max="9" value="0" aria-label="Zones completed"></progress></div>
+    </div>
+    <div class="workspace">
+      <section class="map-card" aria-label="Interactive visitation map">
+        <div class="map-bar"><strong id="mapTitle">Town overview</strong>
+          <label class="map-source"><span class="sr">Map background</span><select id="source"><option value="street">Street map</option><option value="paper">Paper map</option></select></label>
+        </div>
+        <div class="canvas">
+          <svg id="town" viewBox="45 99 1310 976" aria-label="Map of the nine visitation zones in Itapuã do Oeste">
+            <defs>
+              <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse"><path d="M34 0H0v34" fill="none" stroke="#dce0d7" stroke-width=".9"/></pattern>
+              <clipPath id="boundaries"><% zones.forEach(z => { %><polygon points="<%= z.polygon.map(p => p.join(',')).join(' ') %>"/><% }) %></clipPath>
+              <path id="streets" d="M214 220 530 264 M165 516 1238 536 M126 740 1256 751 M75 1045 470 1029 934 1043 1282 1042 M109 865 1266 879 M654 992 1106 997 M244 999 648 1002 M298 946 474 948 M208 672 399 674 M181 607 454 609 M251 516 303 232 M345 519 381 242 M386 742 408 516 435 253 M436 741 462 518 491 261 M471 1029 490 743 510 522 530 264 M293 1040 341 740 M357 1036 390 742 M509 1002 532 745 M562 1002 585 745 M598 1001 617 743 M648 993 667 745 M704 989 712 745 M801 992 805 879 M823 992 826 879 M881 993 878 748 M934 1043 922 746 917 531 925 352 926 298 M1010 1043 1004 875 975 746 M1075 993 1065 750 M1200 1039 1171 750 M1066 946 1190 949 M1068 901 1181 903 M496 615 921 622 M526 742 542 617 M559 743 575 524 582 281 M603 743 616 617 M634 743 645 526 M668 744 673 526 675 353 677 281 M707 744 723 525 726 280 727 125 M742 746 754 530 M791 745 798 530 802 352 806 125 M828 746 837 530 841 356 M869 745 880 532 M515 436 921 441 1318 453 M524 340 676 343 M529 281 726 280 M675 353 925 352 M594 525 606 282 614 177 M615 178 669 174 674 281 M608 246 674 246 M611 212 672 213 M539 158 968 154 M727 220 1003 222 M727 185 1001 183 M860 351 859 125 M922 352 917 123 M917 490 1110 492 M922 352 1100 354 M1046 533 1041 354 M1106 533 1100 319 M1172 535 1156 252 M1236 535 1211 252 M916 576 1243 580 M919 619 1246 624 M920 662 1250 668 M922 705 1253 709 M985 748 978 664 M1059 747 1046 534 M1119 749 1108 535 M1181 750 1166 535"/>
+            </defs>
+            <g id="drawing">
+              <rect x="-2000" y="-2000" width="6000" height="6000" fill="url(#grid)"/>
+              <g id="fills"><% zones.forEach(z => { %><polygon class="area area-<%= z.id %>" points="<%= z.polygon.map(p => p.join(',')).join(' ') %>"/><% }) %></g>
+              <g clip-path="url(#boundaries)" fill="none" stroke-linejoin="round" stroke-linecap="round"><use href="#streets" stroke="#ced1c1" stroke-width="8"/><use href="#streets" stroke="#fffdf7" stroke-width="5.5"/></g>
+              <path d="m25 1049 445-20 464 14 460-1" fill="none" stroke="#dbc490" stroke-width="14"/>
+              <path d="m25 1049 445-20 464 14 460-1" fill="none" stroke="#fff1c5" stroke-width="8"/>
+              <g class="land-use"><path d="m265 342 163 2-24 171-159-1z"/><path d="m713 882 27 1-2 103-31-1z"/><path d="m942 363 107-1 2 51-111-1z"/></g>
+              <g id="labels" class="map-labels" aria-hidden="true"></g>
+            </g>
+            <image id="paper" x="45" y="99" width="1310" height="976" preserveAspectRatio="none" visibility="hidden"/>
+            <g id="zones"><% zones.forEach(z => { %><polygon data-zone="<%= z.id %>" class="boundary" points="<%= z.polygon.map(p => p.join(',')).join(' ') %>"><title>Zone <%= z.id %> · <%= z.landmark %></title></polygon><% }) %></g>
+            <g id="badges"><% zones.forEach(z => { %><g data-zone="<%= z.id %>" transform="translate(<%= z.label.join(' ') %>)"><rect x="-22" y="-22" width="44" height="44" rx="12"/><text y="1"><%= z.id %></text></g><% }) %></g>
+            <g id="marks"></g><g id="draft"></g>
+          </svg>
+          <div class="zoom"><button id="plus" aria-label="Zoom in">+</button><button id="minus" aria-label="Zoom out">−</button><button id="fit" aria-label="Fit map"><svg><use href="#fit-icon"/></svg></button></div>
+          <div id="instruction" hidden></div>
+        </div>
+        <div class="map-bottom"><div class="legend"><span><i class="swatch line"></i>Walked</span><span><i class="swatch pin"></i>Follow-up</span><span><i class="swatch complete"></i>Completed zone</span></div>
+        <div id="tools" hidden><button id="walk" class="primary"><svg><use href="#line-icon"/></svg>Mark a stretch</button><button id="visit"><svg><use href="#pin-icon"/></svg>Pin follow-up</button><button id="cancel" hidden>Cancel</button></div></div>
+      </section>
+      <aside class="side"><div id="overview"><div class="side-head"><h2>Zones</h2><span>9</span></div><p class="hint">Choose a zone to mark your visit.</p><div id="zoneList"></div></div>
+        <div id="detail" hidden><button id="allZones" class="back"><svg><use href="#back-icon"/></svg>All zones</button><h2 id="detailTitle"></h2><p id="landmark" class="hint"></p><div id="counts"></div>
+          <button id="zoneStatus"></button><h3>Return visits</h3><div id="returnList"></div><h3>Walked stretches</h3><div id="stretchList"></div></div>
+      </aside>
+    </div>
+    <p id="message" role="status" aria-live="polite"></p>
+  </main>
+  <dialog id="visitDialog"><form id="visitForm"><h2>Pin follow-up</h2><p class="hint" id="dialogZone"></p>
+    <label>Household or landmark<input name="title" maxlength="160" placeholder="e.g. Blue house beside the praça" required></label>
+    <label>Return date <small>(optional)</small><input name="dueDate" type="date"></label>
+    <label>Visit notes <small>(optional)</small><textarea name="notes" maxlength="1500" rows="3"></textarea></label>
+    <p id="formError" role="alert"></p><div class="dialog-actions"><button type="button" id="dismiss">Cancel</button><button class="primary" type="submit">Save follow-up</button></div>
+  </form></dialog>
+  <script type="application/json" id="bootstrap"><%- JSON.stringify({ zones, state }).replace(/</g, '\\u003c') %></script>
+  <script src="/static/js/field-map.js" defer></script>
+</body></html>
