@@ -14,12 +14,12 @@
   "type": "commonjs",
   "dependencies": {
     "cheerio": "^1.2.0",
-    "csv-parse": "^6.2.1",
+    "csv-parse": "^7.0.3",
     "ejs": "^5.0.2",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
-    "multer": "^2.1.1",
-    "mysql2": "^3.22.1",
-    "xlsx": "^0.18.5"
+    "multer": "^2.5.0",
+    "mysql2": "^3.24.6",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }
