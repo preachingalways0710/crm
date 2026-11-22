@@ -131,8 +131,8 @@
       mode === 'pin'
         ? 'Tap the house or landmark to revisit.'
         : start
-          ? 'Tap where you stopped walking.'
-          : 'Tap where you started walking.';
+          ? '2 of 2 · Tap the end point.'
+          : '1 of 2 · Tap the starting point.';
     town.style.cursor = mode ? 'crosshair' : '';
   }
 

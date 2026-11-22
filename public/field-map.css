@@ -346,19 +346,13 @@ progress::-moz-progress-bar {
   height: 18px !important;
 }
 #instruction {
-  position: absolute;
-  bottom: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: calc(100% - 20px);
-  background: #173e36;
-  color: white;
-  border-radius: 8px;
-  padding: 0.55rem 0.85rem;
-  font-size: 0.9rem;
-  text-align: center;
-  pointer-events: none;
+  flex: 1;
+  min-width: 0;
+  color: var(--green);
+  font-weight: 600;
+}
+#tools #cancel {
+  flex: none;
 }
 .map-bottom {
   padding: 0.78rem 1rem;
